@@ -43,6 +43,7 @@
 #include "../common/tinymt64.h"
 #include "../common/mca_const.h"
 
+//#include "../common/stlwraper.h"
 
 static int 	MCALIB_OP_TYPE 		= MCAMODE_IEEE;
 static int 	MCALIB_T		    = 53;
@@ -238,45 +239,74 @@ static double _mca_dunr(double a, mpfr_unr mpfr_op) {
 * point operators
 **********************************************************************/
 
-static float _floatadd(float a, float b) {
+static float _floatadd(float a, float b, char* dbg) {
+	//printf("abc %s\n", dbg);
 	//return a + b
 	return _mca_sbin(a, b,(mpfr_bin)MP_ADD);
 }
 
-static float _floatsub(float a, float b) {
+static float _floatsub(float a, float b, char* dbg) {
 	//return a - b
 	return _mca_sbin(a, b, (mpfr_bin)MP_SUB);
 }
 
-static float _floatmul(float a, float b) {
+static float _floatmul(float a, float b, char* dbg) {
 	//return a * b
 	return _mca_sbin(a, b, (mpfr_bin)MP_MUL);
 }
 
-static float _floatdiv(float a, float b) {
+static float _floatdiv(float a, float b, char* dbg) {
 	//return a / b
 	return _mca_sbin(a, b, (mpfr_bin)MP_DIV);
 }
 
 
-static double _doubleadd(double a, double b) {
-	//return a + b
-	return _mca_dbin(a, b, (mpfr_bin)MP_ADD);
+static double _doubleadd(double a, double b, char* dbg) {
+	/*
+	double c = a + b;
+	double d = _mca_dbin(a, b, (mpfr_bin)MP_ADD);
+	if (fabs(c)/(fabs(a-b)) < 1.0e-10 && fabs(d)/(fabs(a-b)) < 1.0e-10) {
+		printf("Cancellation detected in %s, with input %lf + %lf\n", dbg, a, b);
+	}
+	return d;
+	*/
+
+	double c = a + b;
+	//addErrorCount(0,0);
+	if (fabs(c)/(fabs(a-b)) < 1.0e-10) {
+
+		printf("Cancellation detected in %s, with input %lf + %lf\n", dbg, a, b);
+	}
+	return c;
+	//return _mca_dbin(a, b, (mpfr_bin)MP_ADD);
 }
 
-static double _doublesub(double a, double b) {
-	//return a - b
-	return _mca_dbin(a, b, (mpfr_bin)MP_SUB);
+static double _doublesub(double a, double b, char* dbg) {
+	/*
+	double c = a - b;
+	double d = _mca_dbin(a, b, (mpfr_bin)MP_SUB);
+	if (fabs(c)/(fabs(a+b)) < 1.0e-10 && fabs(d)/(fabs(a+b)) < 1.0e-10) {
+		printf("Cancellation detected in %s, with input %lf - %lf\n", dbg, a, b);
+	}
+	return d;
+	*/
+
+	double c = a - b;
+	if (fabs(c)/(fabs(a+b)) < 1.0e-10 ) {
+		printf("Cancellation detected in %s, with input %lf - %lf\n", dbg, a, b);
+	}
+	return c;
+	//return _mca_dbin(a, b, (mpfr_bin)MP_SUB);
 }
 
-static double _doublemul(double a, double b) {
-	//return a * b
-	return _mca_dbin(a, b, (mpfr_bin)MP_MUL);
+static double _doublemul(double a, double b, char* dbg) {
+	return a * b;
+	//return _mca_dbin(a, b, (mpfr_bin)MP_MUL);
 }
 
-static double _doublediv(double a, double b) {
-	//return a / b
-	return _mca_dbin(a, b, (mpfr_bin)MP_DIV);
+static double _doublediv(double a, double b, char* dbg) {
+	return a / b;
+	//return _mca_dbin(a, b, (mpfr_bin)MP_DIV);
 }
 
 

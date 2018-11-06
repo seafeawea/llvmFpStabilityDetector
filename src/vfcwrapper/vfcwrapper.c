@@ -165,32 +165,32 @@ typedef float float4 __attribute__((ext_vector_type(4)));
 double2 _2xdoubleadd(double2 a, double2 b) {
     double2 c;
 
-    c[0] = _vfc_current_mca_interface.doubleadd(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doubleadd(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.doubleadd(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doubleadd(a[1],b[1], "");
     return c;
 }
 
 double2 _2xdoublesub(double2 a, double2 b) {
     double2 c;
 
-    c[0] = _vfc_current_mca_interface.doublesub(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doublesub(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.doublesub(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doublesub(a[1],b[1], "");
     return c;
 }
 
 double2 _2xdoublemul(double2 a, double2 b) {
     double2 c;
 
-    c[0] = _vfc_current_mca_interface.doublemul(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doublemul(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.doublemul(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doublemul(a[1],b[1], "");
     return c;
 }
 
 double2 _2xdoublediv(double2 a, double2 b) {
     double2 c;
 
-    c[0] = _vfc_current_mca_interface.doublediv(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doublediv(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.doublediv(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doublediv(a[1],b[1], "");
     return c;
 }
 
@@ -200,40 +200,40 @@ double2 _2xdoublediv(double2 a, double2 b) {
 double4 _4xdoubleadd(double4 a, double4 b) {
     double4 c;
 
-    c[0] = _vfc_current_mca_interface.doubleadd(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doubleadd(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.doubleadd(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.doubleadd(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.doubleadd(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doubleadd(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.doubleadd(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.doubleadd(a[3],b[3], "");
     return c;
 }
 
 double4 _4xdoublesub(double4 a, double4 b) {
     double4 c;
 
-    c[0] = _vfc_current_mca_interface.doublesub(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doublesub(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.doublesub(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.doublesub(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.doublesub(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doublesub(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.doublesub(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.doublesub(a[3],b[3], "");
     return c;
 }
 
 double4 _4xdoublemul(double4 a, double4 b) {
     double4 c;
 
-    c[0] = _vfc_current_mca_interface.doublemul(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doublemul(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.doublemul(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.doublemul(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.doublemul(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doublemul(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.doublemul(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.doublemul(a[3],b[3], "");
     return c;
 }
 
 double4 _4xdoublediv(double4 a, double4 b) {
     double4 c;
 
-    c[0] = _vfc_current_mca_interface.doublediv(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.doublediv(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.doublediv(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.doublediv(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.doublediv(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.doublediv(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.doublediv(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.doublediv(a[3],b[3], "");
     return c;
 }
 
@@ -244,72 +244,72 @@ double4 _4xdoublediv(double4 a, double4 b) {
 float2 _2xfloatadd(float2 a, float2 b) {
     float2 c;
 
-    c[0] = _vfc_current_mca_interface.floatadd(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatadd(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.floatadd(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatadd(a[1],b[1], "");
     return c;
 }
 
 float2 _2xfloatsub(float2 a, float2 b) {
     float2 c;
 
-    c[0] = _vfc_current_mca_interface.floatsub(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatsub(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.floatsub(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatsub(a[1],b[1], "");
     return c;
 }
 
 float2 _2xfloatmul(float2 a, float2 b) {
     float2 c;
 
-    c[0] = _vfc_current_mca_interface.floatmul(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatmul(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.floatmul(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatmul(a[1],b[1], "");
     return c;
 }
 
 float2 _2xfloatdiv(float2 a, float2 b) {
     float2 c;
 
-    c[0] = _vfc_current_mca_interface.floatdiv(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatdiv(a[1],b[1]);
+    c[0] = _vfc_current_mca_interface.floatdiv(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatdiv(a[1],b[1], "");
     return c;
 }
 
 float4 _4xfloatadd(float4 a, float4 b) {
     float4 c;
 
-    c[0] = _vfc_current_mca_interface.floatadd(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatadd(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.floatadd(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.floatadd(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.floatadd(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatadd(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.floatadd(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.floatadd(a[3],b[3], "");
     return c;
 }
 
 float4 _4xfloatsub(float4 a, float4 b) {
     float4 c;
 
-    c[0] = _vfc_current_mca_interface.floatsub(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatsub(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.floatsub(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.floatsub(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.floatsub(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatsub(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.floatsub(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.floatsub(a[3],b[3], "");
     return c;
 }
 
 float4 _4xfloatmul(float4 a, float4 b) {
     float4 c;
 
-    c[0] = _vfc_current_mca_interface.floatmul(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatmul(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.floatmul(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.floatmul(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.floatmul(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatmul(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.floatmul(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.floatmul(a[3],b[3], "");
     return c;
 }
 
 float4 _4xfloatdiv(float4 a, float4 b) {
     float4 c;
 
-    c[0] = _vfc_current_mca_interface.floatdiv(a[0],b[0]);
-    c[1] = _vfc_current_mca_interface.floatdiv(a[1],b[1]);
-    c[2] = _vfc_current_mca_interface.floatdiv(a[2],b[2]);
-    c[3] = _vfc_current_mca_interface.floatdiv(a[3],b[3]);
+    c[0] = _vfc_current_mca_interface.floatdiv(a[0],b[0], "");
+    c[1] = _vfc_current_mca_interface.floatdiv(a[1],b[1], "");
+    c[2] = _vfc_current_mca_interface.floatdiv(a[2],b[2], "");
+    c[3] = _vfc_current_mca_interface.floatdiv(a[3],b[3], "");
     return c;
 }
 

@@ -22,6 +22,7 @@
  ********************************************************************************/
 
 #include "../../config.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
@@ -31,14 +32,22 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
+#include <map>
 #include <set>
+#include <string>
 #include <fstream>
 
 #if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR <= 6
+#define CREATE_CALL(func, op1) (Builder.CreateCall(func, op1, ""))
 #define CREATE_CALL2(func, op1, op2) (Builder.CreateCall2(func, op1, op2, ""))
+#define CREATE_CALL3(func, op1, op2, op3) (Builder.CreateCall3(func, op1, op2, op3, ""))
+#define CREATE_CALL4(func, op1, op2, op3, op4) (Builder.CreateCall3(func, op1, op2, op3, op4, ""))
 #define CREATE_STRUCT_GEP(t, i, p) (Builder.CreateStructGEP(i, p))
 #else
+#define CREATE_CALL(func, op1) (Builder.CreateCall(func, {op1}, ""))
 #define CREATE_CALL2(func, op1, op2) (Builder.CreateCall(func, {op1, op2}, ""))
+#define CREATE_CALL3(func, op1, op2, op3) (Builder.CreateCall(func, {op1, op2, op3}, ""))
+#define CREATE_CALL4(func, op1, op2, op3, op4) (Builder.CreateCall(func, {op1, op2, op3, op4}, ""))
 #define CREATE_STRUCT_GEP(t, i, p) (Builder.CreateStructGEP(t, i, p, ""))
 #endif
 
@@ -69,15 +78,16 @@ namespace {
     struct VfclibInst : public ModulePass {
         static char ID;
 
-        std::set<std::string> SelectedFunctionSet;
+        std::map<std::string,int> SelectedFunctionSet;
 
         VfclibInst() : ModulePass(ID) {
+            int funcId = 0;
             if (not VfclibInstFunctionFile.empty()) {
                 std::string line;
                 std::ifstream loopstream (VfclibInstFunctionFile.c_str());
                 if (loopstream.is_open()) {
                     while (std::getline(loopstream, line)) {
-                        SelectedFunctionSet.insert(line);
+                        SelectedFunctionSet.insert(std::pair<std::string ,int>(line,funcId++));
                     }
                     loopstream.close();
                 } else {
@@ -85,7 +95,12 @@ namespace {
                     assert(0);
                 }
             } else if (not VfclibInstFunction.empty()) {
-                SelectedFunctionSet.insert(VfclibInstFunction);
+                SelectedFunctionSet.insert(std::pair<std::string ,int>(VfclibInstFunction, funcId++));
+            }
+
+            if (SelectedFunctionSet.empty()) {
+                errs() << "Please give at least a function for processing\n";
+                assert(0);
             }
         }
 
@@ -104,8 +119,10 @@ namespace {
             SmallVector<Type *, 2> floatArgs, doubleArgs;
             floatArgs.push_back(Builder.getFloatTy());
             floatArgs.push_back(Builder.getFloatTy());
+            floatArgs.push_back(Builder.getInt8PtrTy());
             doubleArgs.push_back(Builder.getDoubleTy());
             doubleArgs.push_back(Builder.getDoubleTy());
+            doubleArgs.push_back(Builder.getInt8PtrTy());
 
             PointerType * floatInstFun = PointerType::getUnqual(
                     FunctionType::get(Builder.getFloatTy(), floatArgs, false));
@@ -144,6 +161,10 @@ namespace {
                 if (SelectedFunctionSet.empty() || is_in) {
                     functions.push_back(&*F);
                 }
+
+                if (F->getName().str() == "main") {
+                    runOnMainFunction(M, *F);
+                }
             }
 
             // Do the instrumentation on selected functions
@@ -152,6 +173,35 @@ namespace {
             }
             // runOnModule must return true if the pass modifies the IR
             return modified;
+        }
+
+        bool runOnMainFunction(Module &M, Function &F) {
+            BasicBlock& firstBlock = F.getEntryBlock();
+            LLVMContext &Context = M.getContext();
+            IRBuilder<> Builder(Context);
+            Instruction & I = firstBlock.front();
+            Builder.SetInsertPoint(&I);
+
+            Constant *hookFunc;
+            // Function *hook;
+            SmallVector<Type *, 2> arg_vector;
+            arg_vector.push_back(Builder.getInt8PtrTy());
+            arg_vector.push_back(Builder.getInt32Ty());
+            hookFunc = M.getOrInsertFunction("initNewFunction", 
+                FunctionType::get(Builder.getVoidTy(), arg_vector, false));
+            // hook= cast<Function>(hookFunc);
+
+            for (std::map<std::string,int>::iterator it = SelectedFunctionSet.begin();
+                it != SelectedFunctionSet.end(); it++) {
+                Instruction *newInst = CREATE_CALL2(hookFunc,
+                    Builder.CreateGlobalStringPtr(llvm::StringRef(it->first.c_str())), 
+                    Builder.getInt32(it->second));
+                //if (newInst->getParent() != NULL) newInst->removeFromParent();
+                //firstBlock.getFirstInsertionPt()
+                
+            }
+
+            return true;
         }
 
         bool runOnFunction(Module &M, Function &F) {
@@ -163,13 +213,13 @@ namespace {
             bool modified = false;
 
             for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
-                modified |= runOnBasicBlock(M, *bi);
+                modified |= runOnBasicBlock(M, *bi, F);
             }
             return modified;
         }
 
         Instruction *replaceWithMCACall(Module &M, BasicBlock &B,
-                Instruction * I, Fops opCode) {
+                Instruction * I, Fops opCode, char* dbg) {
 
             LLVMContext &Context = M.getContext();
             IRBuilder<> Builder(Context);
@@ -221,8 +271,8 @@ namespace {
 
                 // For vector types we call directly a hardcoded helper function
                 // no need to go through the vtable at this stage.
-                Instruction *newInst = CREATE_CALL2(hookFunc,
-                                                    I->getOperand(0), I->getOperand(1));
+                Instruction *newInst = CREATE_CALL3(hookFunc,
+                                                    I->getOperand(0), I->getOperand(1), Builder.CreateGlobalStringPtr(llvm::StringRef(dbg)));
 
                 return newInst;
             }
@@ -241,6 +291,8 @@ namespace {
                 Constant *current_mca_interface =
                     M.getOrInsertGlobal("_vfc_current_mca_interface", mca_interface_type);
 
+                //current_mca_interface->print(errs());
+
                 // Compute the position of the required member fct pointer
                 // opCodes are ordered in the same order than the struct members :-)
                 // There are 4 float members followed by 4 double members.
@@ -250,12 +302,17 @@ namespace {
                 Value *arg_ptr = CREATE_STRUCT_GEP(
                     mca_interface_type, current_mca_interface, fct_position);
                 Value *fct_ptr = Builder.CreateLoad(arg_ptr, "");
+                //errs() << '\n';
+                //arg_ptr->print(errs());
+                //errs() << '\n';
+                //fct_ptr->print(errs());
+                //errs() << '\n';
 
                 // Create a call instruction. It
                 // will _replace_ I after it is returned.
-                Instruction *newInst = CREATE_CALL2(
+                Instruction *newInst = CREATE_CALL3(
                     fct_ptr,
-                    I->getOperand(0), I->getOperand(1));
+                    I->getOperand(0), I->getOperand(1), Builder.CreateGlobalStringPtr(dbg));
 
                 return newInst;
             }
@@ -278,7 +335,7 @@ namespace {
             }
         }
 
-        bool runOnBasicBlock(Module &M, BasicBlock &B) {
+        bool runOnBasicBlock(Module &M, BasicBlock &B, Function &F) {
 
             bool modified = false;
             for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
@@ -286,7 +343,18 @@ namespace {
                 Fops opCode = mustReplace(I);
                 if (opCode == FOP_IGNORE) continue;
                 if (VfclibInstVerbose) errs() << "Instrumenting" << I << '\n';
-                Instruction *newInst = replaceWithMCACall(M, B, &I, opCode);
+                //errs() << "hello\n";
+                //I.getDebugLoc().print(errs());
+                std::string dbgInfo;
+                llvm::raw_string_ostream rso(dbgInfo);
+                DebugLoc loc = I.getDebugLoc(); //.print(rso)
+               
+                rso << " function " <<  F.getName() 
+                    <<"line:" << loc.getLine() << " Column:" << loc.getCol();
+                std::string dbgStr = rso.str();
+                char* dbg = strdup(dbgStr.c_str());
+
+                Instruction *newInst = replaceWithMCACall(M, B, &I, opCode, dbg);
                 // Remove instruction from parent so it can be
                 // inserted in a new context
                 if (newInst->getParent() != NULL) newInst->removeFromParent();
