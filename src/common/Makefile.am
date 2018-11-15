@@ -1,7 +1,11 @@
-noinst_LTLIBRARIES = libtinymt64.la
+noinst_LTLIBRARIES = libtinymt64.la libstlwraper.la
 libtinymt64_la_CFLAGS = -fPIC -static
 libtinymt64_la_SOURCES = \
-	tinymt64.h \
 	tinymt64.c \
+	tinymt64.h 
+
+libstlwraper_la_CXXFLAGS = -fPIC -static
+libstlwraper_la_SOURCES = \
 	stlwraper.cpp \
 	stlwraper.h
+	

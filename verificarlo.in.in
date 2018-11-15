@@ -100,6 +100,12 @@ def linker_mode(sources, options, output, args):
 
     f=tempfile.NamedTemporaryFile()
     if args.static:
+        print('{output} {sources} {options} -static .vfcwrapper.o {mcalib_static} -lmpfr -lgmp {gfortran} -lm'.format(
+            output=output,
+            sources=' '.join([os.path.splitext(s)[0]+'.o' for s in sources]),
+            options=options,
+            mcalib_static=mcalib_static,
+            gfortran=gfortran))
         f.write('{output} {sources} {options} -static .vfcwrapper.o {mcalib_static} -lmpfr -lgmp {gfortran} -lm'.format(
             output=output,
             sources=' '.join([os.path.splitext(s)[0]+'.o' for s in sources]),
@@ -108,7 +114,14 @@ def linker_mode(sources, options, output, args):
             gfortran=gfortran))
        
     else:
-        f.write('{output} {sources} {options} .vfcwrapper.o {mcalib_options} {mcalib_dynamic} {gfortran}'.format(
+        print('{output} {sources} {options} .vfcwrapper.o {mcalib_options} {mcalib_dynamic} {gfortran} -lm'.format(
+            output=output,
+            sources=' '.join([os.path.splitext(s)[0]+'.o' for s in sources]),
+            options=options,
+            mcalib_options=mcalib_options,
+            mcalib_dynamic=mcalib_dynamic,
+            gfortran=gfortran))
+        f.write('{output} {sources} {options} .vfcwrapper.o {mcalib_options} {mcalib_dynamic} {gfortran} -lm'.format(
             output=output,
             sources=' '.join([os.path.splitext(s)[0]+'.o' for s in sources]),
             options=options,
@@ -163,9 +176,14 @@ def compiler_mode(sources, options, output, args):
             ins=ins
             ))
 
-        if not output:
-            output = '-o ' + basename + '.o'
+        #if not output:
+        output = '-o ' + basename + '.o'
         # Produce object file
+        print('{clang} -c {output} {ins} {options}'.format(
+            clang=clang,
+            output=output,
+            ins=ins,
+            options=options))
         shell('{clang} -c {output} {ins} {options}'.format(
             clang=clang,
             output=output,
@@ -187,8 +205,8 @@ if __name__ == "__main__":
 
     # check input files
 
-    if len(sources) > 1 and args.o:
-        fail('cannot specify -o when generating multiple output files')
+    # if len(sources) > 1 and args.o:
+    #    fail('cannot specify -o when generating multiple output files')
 
     if args.function and args.functions_file:
         fail("Cannot used --function and --functions-file together")

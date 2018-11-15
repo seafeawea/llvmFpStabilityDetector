@@ -21,6 +21,11 @@
  *                                                                              *
  ********************************************************************************/
 
+#ifndef _VFC_WRAPPER_H
+#define _VFC_WRAPPER_H
+
+#include <stdint.h>
+
 /* define the available MCA modes of operation */
 #define MCAMODE_IEEE 0
 #define MCAMODE_MCA  1
@@ -39,17 +44,19 @@ int vfc_set_precision_and_mode(unsigned int precision, int mode);
 
 /* MCA backend interface */
 struct mca_interface_t {
-    float (*floatadd)(float, float, char*);
-    float (*floatsub)(float, float, char*);
-    float (*floatmul)(float, float, char*);
-    float (*floatdiv)(float, float, char*);
+    float (*floatadd)(float, float,  int32_t,  int32_t);
+    float (*floatsub)(float, float,  int32_t,  int32_t);
+    float (*floatmul)(float, float,  int32_t,  int32_t);
+    float (*floatdiv)(float, float,  int32_t,  int32_t);
 
-    double (*doubleadd)(double, double, char*);
-    double (*doublesub)(double, double, char*);
-    double (*doublemul)(double, double, char*);
-    double (*doublediv)(double, double, char*);
+    double (*doubleadd)(double, double,  int32_t,  int32_t);
+    double (*doublesub)(double, double,  int32_t,  int32_t);
+    double (*doublemul)(double, double,  int32_t,  int32_t);
+    double (*doublediv)(double, double,  int32_t,  int32_t);
 
     void (*seed)(void);
     int (*set_mca_mode)(int);
     int (*set_mca_precision)(int);
 };
+
+#endif

@@ -41,7 +41,7 @@
 #define CREATE_CALL(func, op1) (Builder.CreateCall(func, op1, ""))
 #define CREATE_CALL2(func, op1, op2) (Builder.CreateCall2(func, op1, op2, ""))
 #define CREATE_CALL3(func, op1, op2, op3) (Builder.CreateCall3(func, op1, op2, op3, ""))
-#define CREATE_CALL4(func, op1, op2, op3, op4) (Builder.CreateCall3(func, op1, op2, op3, op4, ""))
+#define CREATE_CALL4(func, op1, op2, op3, op4) (Builder.CreateCall4(func, op1, op2, op3, op4, ""))
 #define CREATE_STRUCT_GEP(t, i, p) (Builder.CreateStructGEP(i, p))
 #else
 #define CREATE_CALL(func, op1) (Builder.CreateCall(func, {op1}, ""))
@@ -119,10 +119,14 @@ namespace {
             SmallVector<Type *, 2> floatArgs, doubleArgs;
             floatArgs.push_back(Builder.getFloatTy());
             floatArgs.push_back(Builder.getFloatTy());
-            floatArgs.push_back(Builder.getInt8PtrTy());
+            //floatArgs.push_back(Builder.getInt8PtrTy());
+            floatArgs.push_back(Builder.getInt32Ty());
+            floatArgs.push_back(Builder.getInt32Ty());
             doubleArgs.push_back(Builder.getDoubleTy());
             doubleArgs.push_back(Builder.getDoubleTy());
-            doubleArgs.push_back(Builder.getInt8PtrTy());
+            doubleArgs.push_back(Builder.getInt32Ty());
+            doubleArgs.push_back(Builder.getInt32Ty());
+            //doubleArgs.push_back(Builder.getInt8PtrTy());
 
             PointerType * floatInstFun = PointerType::getUnqual(
                     FunctionType::get(Builder.getFloatTy(), floatArgs, false));
@@ -193,11 +197,14 @@ namespace {
 
             for (std::map<std::string,int>::iterator it = SelectedFunctionSet.begin();
                 it != SelectedFunctionSet.end(); it++) {
-                Instruction *newInst = CREATE_CALL2(hookFunc,
-                    Builder.CreateGlobalStringPtr(llvm::StringRef(it->first.c_str())), 
-                    Builder.getInt32(it->second));
-                //if (newInst->getParent() != NULL) newInst->removeFromParent();
-                //firstBlock.getFirstInsertionPt()
+                if(it->first != "") {
+                    Instruction *newInst = CREATE_CALL2(hookFunc,
+                        Builder.CreateGlobalStringPtr(llvm::StringRef(it->first.c_str())), 
+                        Builder.getInt32(it->second));
+                    //    Builder.SetInsertPoint(newInst);
+                    //if (newInst->getParent() != NULL) newInst->removeFromParent();
+                    //firstBlock.getFirstInsertionPt()
+                }
                 
             }
 
@@ -211,15 +218,16 @@ namespace {
             }
 
             bool modified = false;
+            int32_t func_id = SelectedFunctionSet[F.getName()];
 
             for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
-                modified |= runOnBasicBlock(M, *bi, F);
+                modified |= runOnBasicBlock(M, *bi, F, func_id);
             }
             return modified;
         }
 
         Instruction *replaceWithMCACall(Module &M, BasicBlock &B,
-                Instruction * I, Fops opCode, char* dbg) {
+                Instruction * I, Fops opCode, int32_t func_id, int32_t line) {
 
             LLVMContext &Context = M.getContext();
             IRBuilder<> Builder(Context);
@@ -256,7 +264,8 @@ namespace {
                 baseTypeName = "float";
             } else {
                 errs() << "Unsupported operand type: " << *opType << "\n";
-                assert(0);
+                //assert(0);
+                return NULL;
             }
 
             // For vector types, helper functions in vfcwrapper are called
@@ -271,8 +280,8 @@ namespace {
 
                 // For vector types we call directly a hardcoded helper function
                 // no need to go through the vtable at this stage.
-                Instruction *newInst = CREATE_CALL3(hookFunc,
-                                                    I->getOperand(0), I->getOperand(1), Builder.CreateGlobalStringPtr(llvm::StringRef(dbg)));
+                Instruction *newInst = CREATE_CALL4(hookFunc,
+                                                    I->getOperand(0), I->getOperand(1), Builder.getInt32(func_id), Builder.getInt32(line));
 
                 return newInst;
             }
@@ -310,9 +319,10 @@ namespace {
 
                 // Create a call instruction. It
                 // will _replace_ I after it is returned.
-                Instruction *newInst = CREATE_CALL3(
+                Instruction *newInst = CREATE_CALL4(
                     fct_ptr,
-                    I->getOperand(0), I->getOperand(1), Builder.CreateGlobalStringPtr(dbg));
+                    I->getOperand(0), I->getOperand(1), Builder.getInt32(func_id), Builder.getInt32(line));
+                    //I->getOperand(0), I->getOperand(1), Builder.CreateGlobalStringPtr(dbg));
 
                 return newInst;
             }
@@ -335,7 +345,7 @@ namespace {
             }
         }
 
-        bool runOnBasicBlock(Module &M, BasicBlock &B, Function &F) {
+        bool runOnBasicBlock(Module &M, BasicBlock &B, Function &F, int32_t func_id) {
 
             bool modified = false;
             for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
@@ -353,8 +363,9 @@ namespace {
                     <<"line:" << loc.getLine() << " Column:" << loc.getCol();
                 std::string dbgStr = rso.str();
                 char* dbg = strdup(dbgStr.c_str());
-
-                Instruction *newInst = replaceWithMCACall(M, B, &I, opCode, dbg);
+              
+                Instruction *newInst = replaceWithMCACall(M, B, &I, opCode, func_id, loc.getLine());
+                if (newInst == NULL) continue;
                 // Remove instruction from parent so it can be
                 // inserted in a new context
                 if (newInst->getParent() != NULL) newInst->removeFromParent();

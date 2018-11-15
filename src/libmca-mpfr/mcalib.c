@@ -33,6 +33,7 @@
 
 #include <math.h>
 #include <mpfr.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -42,8 +43,7 @@
 #include "../vfcwrapper/vfcwrapper.h"
 #include "../common/tinymt64.h"
 #include "../common/mca_const.h"
-
-//#include "../common/stlwraper.h"
+#include "../common/stlwraper.h"
 
 static int 	MCALIB_OP_TYPE 		= MCAMODE_IEEE;
 static int 	MCALIB_T		    = 53;
@@ -239,29 +239,38 @@ static double _mca_dunr(double a, mpfr_unr mpfr_op) {
 * point operators
 **********************************************************************/
 
-static float _floatadd(float a, float b, char* dbg) {
-	//printf("abc %s\n", dbg);
+static float _floatadd(float a, float b, int32_t func_id, int32_t line) {
 	//return a + b
-	return _mca_sbin(a, b,(mpfr_bin)MP_ADD);
+	float c = a + b;
+	if (fabs(c)/(fabs(a-b)) < 1.0e-5) {
+		addErrorCount(func_id, line);
+	}
+	return c;
+	//return _mca_sbin(a, b,(mpfr_bin)MP_ADD);
 }
 
-static float _floatsub(float a, float b, char* dbg) {
+static float _floatsub(float a, float b, int32_t func_id, int32_t line) {
 	//return a - b
-	return _mca_sbin(a, b, (mpfr_bin)MP_SUB);
+	float c = a - b;
+	if (fabs(c)/(fabs(a+b)) < 1.0e-5 ) {
+		addErrorCount(func_id, line);
+	}
+	return c;
+	//return _mca_sbin(a, b, (mpfr_bin)MP_SUB);
 }
 
-static float _floatmul(float a, float b, char* dbg) {
-	//return a * b
-	return _mca_sbin(a, b, (mpfr_bin)MP_MUL);
+static float _floatmul(float a, float b, int32_t func_id, int32_t line) {
+	return a * b;
+	//return _mca_sbin(a, b, (mpfr_bin)MP_MUL);
 }
 
-static float _floatdiv(float a, float b, char* dbg) {
-	//return a / b
-	return _mca_sbin(a, b, (mpfr_bin)MP_DIV);
+static float _floatdiv(float a, float b, int32_t func_id, int32_t line) {
+	return a / b;
+	//return _mca_sbin(a, b, (mpfr_bin)MP_DIV);
 }
 
 
-static double _doubleadd(double a, double b, char* dbg) {
+static double _doubleadd(double a, double b, int32_t func_id, int32_t line) {
 	/*
 	double c = a + b;
 	double d = _mca_dbin(a, b, (mpfr_bin)MP_ADD);
@@ -273,15 +282,15 @@ static double _doubleadd(double a, double b, char* dbg) {
 
 	double c = a + b;
 	//addErrorCount(0,0);
-	if (fabs(c)/(fabs(a-b)) < 1.0e-10) {
-
-		printf("Cancellation detected in %s, with input %lf + %lf\n", dbg, a, b);
+	if (fabs(c)/(fabs(a-b)) < 1.0e-7) {
+		addErrorCount(func_id, line);
+		//printf("Cancellation detected in %s, with input %lf + %lf\n", dbg, a, b);
 	}
 	return c;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_ADD);
 }
 
-static double _doublesub(double a, double b, char* dbg) {
+static double _doublesub(double a, double b, int32_t func_id, int32_t line) {
 	/*
 	double c = a - b;
 	double d = _mca_dbin(a, b, (mpfr_bin)MP_SUB);
@@ -292,19 +301,20 @@ static double _doublesub(double a, double b, char* dbg) {
 	*/
 
 	double c = a - b;
-	if (fabs(c)/(fabs(a+b)) < 1.0e-10 ) {
-		printf("Cancellation detected in %s, with input %lf - %lf\n", dbg, a, b);
+	if (fabs(c)/(fabs(a+b)) < 1.0e-7 ) {
+		addErrorCount(func_id, line);
+		//printf("Cancellation detected in %s, with input %lf - %lf\n", dbg, a, b);
 	}
 	return c;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_SUB);
 }
 
-static double _doublemul(double a, double b, char* dbg) {
+static double _doublemul(double a, double b, int32_t func_id, int32_t line) {
 	return a * b;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_MUL);
 }
 
-static double _doublediv(double a, double b, char* dbg) {
+static double _doublediv(double a, double b, int32_t func_id, int32_t line) {
 	return a / b;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_DIV);
 }
