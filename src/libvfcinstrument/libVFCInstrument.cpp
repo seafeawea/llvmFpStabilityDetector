@@ -42,12 +42,15 @@
 #define CREATE_CALL2(func, op1, op2) (Builder.CreateCall2(func, op1, op2, ""))
 #define CREATE_CALL3(func, op1, op2, op3) (Builder.CreateCall3(func, op1, op2, op3, ""))
 #define CREATE_CALL4(func, op1, op2, op3, op4) (Builder.CreateCall4(func, op1, op2, op3, op4, ""))
+#define CREATE_CALL5(func, op1, op2, op3, op4, op5) (Builder.CreateCall5(func, op1, op2, op3, op4, op5, ""))
+
 #define CREATE_STRUCT_GEP(t, i, p) (Builder.CreateStructGEP(i, p))
 #else
 #define CREATE_CALL(func, op1) (Builder.CreateCall(func, {op1}, ""))
 #define CREATE_CALL2(func, op1, op2) (Builder.CreateCall(func, {op1, op2}, ""))
 #define CREATE_CALL3(func, op1, op2, op3) (Builder.CreateCall(func, {op1, op2, op3}, ""))
 #define CREATE_CALL4(func, op1, op2, op3, op4) (Builder.CreateCall(func, {op1, op2, op3, op4}, ""))
+#define CREATE_CALL5(func, op1, op2, op3, op4) (Builder.CreateCall(func, {op1, op2, op3, op4, op5}, ""))
 #define CREATE_STRUCT_GEP(t, i, p) (Builder.CreateStructGEP(t, i, p, ""))
 #endif
 
@@ -116,17 +119,22 @@ namespace {
             // three functions are user called functions and are not
             // needed here.
 
-            SmallVector<Type *, 2> floatArgs, doubleArgs;
+            SmallVector<Type *, 7> floatArgs, doubleArgs;
             floatArgs.push_back(Builder.getFloatTy());
             floatArgs.push_back(Builder.getFloatTy());
-            //floatArgs.push_back(Builder.getInt8PtrTy());
             floatArgs.push_back(Builder.getInt32Ty());
             floatArgs.push_back(Builder.getInt32Ty());
+            floatArgs.push_back(Builder.getInt8PtrTy());
+            floatArgs.push_back(Builder.getInt8PtrTy());
+            floatArgs.push_back(Builder.getInt8PtrTy());
+
             doubleArgs.push_back(Builder.getDoubleTy());
             doubleArgs.push_back(Builder.getDoubleTy());
             doubleArgs.push_back(Builder.getInt32Ty());
             doubleArgs.push_back(Builder.getInt32Ty());
-            //doubleArgs.push_back(Builder.getInt8PtrTy());
+            doubleArgs.push_back(Builder.getInt8PtrTy());
+            doubleArgs.push_back(Builder.getInt8PtrTy());
+            doubleArgs.push_back(Builder.getInt8PtrTy());
 
             PointerType * floatInstFun = PointerType::getUnqual(
                     FunctionType::get(Builder.getFloatTy(), floatArgs, false));
@@ -212,6 +220,7 @@ namespace {
         }
 
         bool runOnFunction(Module &M, Function &F) {
+            created_all_global_str.clear();
             if (VfclibInstVerbose) {
                 errs() << "In Function: ";
                 errs().write_escaped(F.getName()) << '\n';
@@ -220,10 +229,63 @@ namespace {
             bool modified = false;
             int32_t func_id = SelectedFunctionSet[F.getName()];
 
+            IRBuilder<> Builder(M.getContext());
+            Builder.SetInsertPoint(&(F.getEntryBlock().front()));
+            SmallVector<Type *,1> arg_vector;
+            arg_vector.push_back(Builder.getInt32Ty());
+            Constant* hookFunc = M.getOrInsertFunction("clearDoubleNodeMap", 
+                FunctionType::get(Builder.getVoidTy(), arg_vector, false));
+            Instruction *newInst = CREATE_CALL(hookFunc, Builder.getInt32(func_id));
+
             for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
                 modified |= runOnBasicBlock(M, *bi, F, func_id);
             }
             return modified;
+        }
+
+        std::map<std::string, Value*> created_all_global_str;
+        Value* createGlobalStringPtrIfNotExist(StringRef sf, IRBuilder<>& Builder) {
+            std::string s = sf.str();
+            if (created_all_global_str.find(s) == created_all_global_str.end()) {
+                Value* global_string = Builder.CreateGlobalStringPtr(sf);
+                created_all_global_str.insert(std::pair<std::string, Value*>(s, global_string));
+            }
+            return created_all_global_str[s];
+        }
+
+        StringRef getFloatArgName(Use& use_arg) {
+            StringRef name_arg;
+            if (isa<Instruction>(use_arg)) {
+                Instruction* I_arg = cast<Instruction>(use_arg);
+                switch (I_arg->getOpcode()) {
+                    case Instruction::FAdd:
+                    case Instruction::FSub:
+                    case Instruction::FMul:
+                    case Instruction::FDiv:
+                    case Instruction::Call:
+                        name_arg = I_arg->getName();
+                        break;
+                    case Instruction::Load:
+                        if (I_arg->getMetadata("fp") != NULL) {
+                            name_arg = cast<MDString>(I_arg->getMetadata("fp")->getOperand(0))->getString();
+                        }
+                        else {
+                            assert(0 && "Load Instrution don't have fp info");
+                        }
+                        
+                        break;
+                    case Instruction::Store:
+                    default:                  
+                        errs() << "I_arg1.opCode " << I_arg->getOpcodeName() << '\n';
+                        assert(0 && "Fop Instrution have invald argument");
+                        break;
+                };
+            } else if (cast<Value>(use_arg)->getValueID() == Value::ConstantFPVal) {
+                name_arg = StringRef("__const__value__");
+            } else {
+                assert(0 && "Fop Instrution have invald argument");
+            }
+            return name_arg;
         }
 
         Instruction *replaceWithMCACall(Module &M, BasicBlock &B,
@@ -281,7 +343,18 @@ namespace {
                 // For vector types we call directly a hardcoded helper function
                 // no need to go through the vtable at this stage.
                 Instruction *newInst = CREATE_CALL4(hookFunc,
-                                                    I->getOperand(0), I->getOperand(1), Builder.getInt32(func_id), Builder.getInt32(line));
+                                                    I->getOperand(0), 
+                                                    I->getOperand(1), 
+                                                    Builder.getInt32(func_id),
+                                                    Builder.getInt32(line));
+                                                    /*
+                Instruction *newInst = CREATE_CALL5(hookFunc,
+                                                    I->getOperand(0), 
+                                                    I->getOperand(1), 
+                                                    Builder.getInt32((func_id<<24)+line),
+                                                    Builder.CreateGlobalStringPtr(I->getOperand(0)->getName()), 
+                                                    Builder.CreateGlobalStringPtr(I->getOperand(1)->getName()));
+                                                    */
 
                 return newInst;
             }
@@ -319,11 +392,41 @@ namespace {
 
                 // Create a call instruction. It
                 // will _replace_ I after it is returned.
-                Instruction *newInst = CREATE_CALL4(
+                /*Instruction *newInst = CREATE_CALL4(
                     fct_ptr,
-                    I->getOperand(0), I->getOperand(1), Builder.getInt32(func_id), Builder.getInt32(line));
-                    //I->getOperand(0), I->getOperand(1), Builder.CreateGlobalStringPtr(dbg));
+                    I->getOperand(0), 
+                    I->getOperand(1), 
+                    Builder.getInt32(func_id), 
+                    Builder.getInt32(line));
+                */
 
+                //const char* arg1 = I->op_begin()->get()->
+                Use& use_arg1 = I->getOperandUse(0);
+                StringRef name_arg1 = getFloatArgName(use_arg1);
+                Use& use_arg2 = I->getOperandUse(1);
+                StringRef name_arg2 = getFloatArgName(use_arg2);
+                
+
+                Value* value_name_arg1 = createGlobalStringPtrIfNotExist(name_arg1, Builder);
+                Value* value_name_arg2 = createGlobalStringPtrIfNotExist(name_arg2, Builder);
+
+                Value* result_name_arg = createGlobalStringPtrIfNotExist(I->getName(), Builder);
+
+                SmallVector<Value*, 7> all_arg;
+                //Builder.getContext().
+                //ArrayRef<Value*> all_arg;
+                all_arg.push_back(I->getOperand(0));
+                all_arg.push_back(I->getOperand(1));
+                all_arg.push_back(Builder.getInt32(func_id));
+                all_arg.push_back(Builder.getInt32(line));
+                all_arg.push_back(value_name_arg1);
+                all_arg.push_back(value_name_arg2);
+                all_arg.push_back(result_name_arg);
+
+                Instruction *newInst = Builder.CreateCall(
+                    fct_ptr,
+                    makeArrayRef<Value*>(all_arg));
+            
                 return newInst;
             }
         }
@@ -350,21 +453,111 @@ namespace {
             bool modified = false;
             for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
                 Instruction &I = *ii;
+
                 Fops opCode = mustReplace(I);
-                if (opCode == FOP_IGNORE) continue;
+                if (opCode == FOP_IGNORE && I.getOpcode() != Instruction::Load && I.getOpcode() != Instruction::Store) continue;
+
+                errs() << "I.opCode " << I.getOpcodeName();
+                errs() << '\n';
+                for (Instruction::op_iterator it = I.op_begin(); it != I.op_end(); it++) {
+                    errs() << "op ";
+                    it->get()->print(errs());
+                    errs() << '\n';
+                }
+
+                if (I.getOpcode() == Instruction::Load) {
+                    Type * opType = I.getOperand(0)->getType();
+                    //errs() << "I.name " << I.getName() << '\n';
+                    if (opType->isPointerTy() && opType->getPointerElementType()->isDoubleTy())
+                    {
+                        //errs() << "good"<< '\n';
+                        MDNode* N = MDNode::get(M.getContext(), MDString::get(M.getContext(), I.getOperand(0)->getName()));
+                        I.setMetadata("fp", N);
+                        
+                    }
+
+                    continue;
+                }
+                if (I.getOpcode() == Instruction::Store) {
+                    if (I.getNumOperands() == 2) {
+                        Type * opType1 = I.getOperand(0)->getType();
+                        Type * opType2 = I.getOperand(1)->getType();
+                        //errs() << "I.name " << I.getName() << '\n';
+                        if (opType1->isDoubleTy() && opType2->isPointerTy() && opType2->getPointerElementType()->isDoubleTy())
+                        {
+                            //if (I.getName())
+                            //I.op_begin()->get()->print(errs());
+                            //errs() << '\n';
+                            //I.getOperand(0)->getType()->print(errs());
+                            /*MDNode* N = MDNode::get(M.getContext(), MDString::get(M.getContext(), I.getOperand(1)->getName()));
+                            if (isa<Instruction>(I.getOperand(0))) {
+                                Instruction& fromI = cast<Instruction>(*(I.getOperand(0)));
+                                if(mustReplace(fromI) != FOP_IGNORE)
+                                    fromI.setMetadata("fp", N);
+                            }*/
+
+                            LLVMContext &Context = M.getContext();
+                            IRBuilder<> Builder(Context);
+                            Builder.SetInsertPoint(&I);
+
+                            SmallVector<Type *, 2> arg_vector;
+                            arg_vector.push_back(Builder.getInt8PtrTy());
+                            arg_vector.push_back(Builder.getInt8PtrTy());
+                            arg_vector.push_back(Builder.getInt32Ty());
+                            arg_vector.push_back(Builder.getDoubleTy());
+                            Constant *hookStoreFunc;
+                            hookStoreFunc = M.getOrInsertFunction("__storeDouble", 
+                                FunctionType::get(Builder.getVoidTy(), arg_vector, false));
+
+                            Use& use_arg1 = I.getOperandUse(0);
+                            StringRef name_arg1;
+                            if (isa<Instruction>(use_arg1)) {
+                                Instruction* I_arg = cast<Instruction>(use_arg1);
+                                switch (I_arg->getOpcode()) {
+                                    case Instruction::Load:
+                                        if (I_arg->getMetadata("fp") != NULL) {
+                                            name_arg1 = cast<MDString>(I_arg->getMetadata("fp")->getOperand(0))->getString();
+                                        }
+                                        else {
+                                            assert(0 && "Load Instrution don't have fp info");
+                                        }
+                                        break;
+
+                                    default:
+                                        name_arg1 = I.getOperand(0)->getName();
+                                        break;
+                                }
+                            } else if (cast<Value>(use_arg1)->getValueID() == Value::ConstantFPVal) {
+                                name_arg1 = StringRef("__const__value__");
+                            } else {
+                                name_arg1 = I.getOperand(0)->getName();
+                            }
+                           
+
+                            Value* value_name_arg1 = createGlobalStringPtrIfNotExist(name_arg1, Builder);
+                            Value* value_name_arg2 = createGlobalStringPtrIfNotExist(I.getOperand(1)->getName(), Builder);
+                            Value* value_arg1 = createGlobalStringPtrIfNotExist(I.getOperand(1)->getName(), Builder);
+
+                            Instruction *newInst = Builder.CreateCall4(hookStoreFunc,
+                            value_name_arg1, 
+                            value_name_arg2,
+                            Builder.getInt32(func_id),
+                            I.getOperand(0), "");
+                        }
+                    }
+
+                    continue;
+                }
+                
                 if (VfclibInstVerbose) errs() << "Instrumenting" << I << '\n';
-                //errs() << "hello\n";
-                //I.getDebugLoc().print(errs());
+
                 std::string dbgInfo;
                 llvm::raw_string_ostream rso(dbgInfo);
                 DebugLoc loc = I.getDebugLoc(); //.print(rso)
-               
-                rso << " function " <<  F.getName() 
-                    <<"line:" << loc.getLine() << " Column:" << loc.getCol();
-                std::string dbgStr = rso.str();
-                char* dbg = strdup(dbgStr.c_str());
+                
               
                 Instruction *newInst = replaceWithMCACall(M, B, &I, opCode, func_id, loc.getLine());
+                
                 if (newInst == NULL) continue;
                 // Remove instruction from parent so it can be
                 // inserted in a new context
