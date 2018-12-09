@@ -23,7 +23,8 @@ static bool is_write_to_file = (getenv(FILE_TO_PRINT_ERROR_ENV) != NULL);
 
 using namespace std;
 
-string DoubleConvertToString(double value) {
+template<typename T>
+string ConvertToString(T value) {
   stringstream ss;
   ss << value;
   return ss.str();
@@ -243,7 +244,7 @@ static char* mpfrToString(char* str, mpfr_t* fp) {
 }
 
 FpNode* createConstantDoubleFPNodeIfNotExists(double val) {
-  string value_str(DoubleConvertToString(val));
+  string value_str(ConvertToString(val));
   FpNode* node;
   if (double_const_node_map.find(value_str) == double_const_node_map.end()) {
     double_const_node_map.insert(pair<string, FpNode>(value_str, FpNode()));
@@ -307,15 +308,17 @@ extern "C" void __storeDouble(char* from, char* to, int32_t func_id,
 }
 
 extern "C" void __storeDoubleArrayElement(char* from, char* to, int32_t func_id,
-                                          int32_t line, double from_val) {
-  printf("store %s = %s, func_id=%d, from_val=%f\n", to, from, func_id,
-         from_val);
+                                          int32_t line, double from_val,
+                                          int32_t index) {
+  printf("store %s_%d = %s, func_id=%d, from_val=%f\n", to, index, from,
+         func_id, from_val);
 
   map<string, vector<FpNode> >& fp_node_map =
       all_function_info[func_id].fp_node_map;
 
   string from_name_str(from);
   string to_name_str(to);
+  to_name_str.append("[" + ConvertToString(index) + "]");
   FpNode* from_node;
   if (from_name_str == "__const__value__") {
     from_node = createConstantDoubleFPNodeIfNotExists(from_val);

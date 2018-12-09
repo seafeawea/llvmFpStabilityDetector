@@ -254,7 +254,9 @@ struct VfclibInst : public ModulePass {
   Value *createGlobalStringPtrIfNotExist(StringRef sf, IRBuilder<> &Builder) {
     std::string s = sf.str();
     if (created_all_global_str.find(s) == created_all_global_str.end()) {
+      errs() << __LINE__ << s << "\n";
       Value *global_string = Builder.CreateGlobalStringPtr(sf);
+      errs() << __LINE__ << "\n";
       created_all_global_str.insert(
           std::pair<std::string, Value *>(s, global_string));
     }
@@ -454,38 +456,43 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
   bool runOnEntryBlock(Module &M, BasicBlock &BBEntry) {
     BasicBlock::iterator I = BBEntry.begin();
     while (isa<AllocaInst>(I)) ++I;
-    // ii is the fisrt non-alloca instruction
+    // now I is the fisrt non-alloca instruction
     for (BasicBlock::iterator ie = BBEntry.end(); I != ie; ++I) {
       if (isa<StoreInst>(I)) {
         errs() << "a entry store instruction" << '\n';
         Type *ty0 = I->getOperand(0)->getType();
-        /* ty0->getPointerElementType()->print(errs());
-        if (ty0->isPointerTy()) {
-          errs() << "good0" << '\n';
-          if (ty0->getPointerElementType()->isArrayTy()) {
-            errs() << "good1" << '\n';
-            if (ty0->getPointerElementType()
-                    ->getArrayElementType()
-                    ->isDoubleTy()) {
-              errs() << "good2" << '\n';
-            }
-          }
-        } 
-        errs() << '\n';
-        */
 
         // IR: store [2 x double]* %2, [2 x double]** %.reg2mem26
-        // if is [n x double]*        
+        // if is [n x double]*
         if (ty0->isPointerTy() && ty0->getPointerElementType()->isArrayTy() &&
             ty0->getPointerElementType()->getArrayElementType()->isDoubleTy() &&
             I->getOperand(1)->getName().startswith(".reg2mem")) {
           Value *arg0 = I->getOperandUse(0);
           // IR: %2 = load [2 x double]** %roots_addr, align 8
           if (isa<LoadInst>(arg0)) {
-            //errs() << "process entry store double vector instruction" << '\n';
+            // errs() << "process entry store double vector instruction" <<
+            // '\n';
+            assert(
+                !(cast<Instruction>(arg0)->getOperand(0)->getName().empty()) &&
+                "function arg should has a name");
             Value *arg1 = I->getOperand(1);
             arg1->setName("xzFP_" +
                           cast<Instruction>(arg0)->getOperand(0)->getName());
+            continue;
+          }
+        } else if (ty0->isPointerTy() &&
+                   ty0->getPointerElementType()->isDoubleTy() &&
+                   I->getOperand(1)->getName().startswith(".reg2mem")) {
+          Value *arg0 = I->getOperandUse(0);
+          // IR: %2 = load double* %roots_addr, align 8
+          if (isa<LoadInst>(arg0)) {
+            assert(
+                !(cast<Instruction>(arg0)->getOperand(0)->getName().empty()) &&
+                "function arg should has a name");
+            Value *arg1 = I->getOperand(1);
+            arg1->setName("xzFP_" +
+                          cast<Instruction>(arg0)->getOperand(0)->getName());
+            continue;
           }
         }
       }
@@ -494,6 +501,26 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
   bool runOnBasicBlock(Module &M, BasicBlock &B, Function &F, int32_t func_id) {
     bool modified = false;
+
+    LLVMContext &Context = M.getContext();
+    IRBuilder<> Builder(Context);
+    SmallVector<Type *, 5> arg_func_signalture;
+    arg_func_signalture.push_back(Builder.getInt8PtrTy());
+    arg_func_signalture.push_back(Builder.getInt8PtrTy());
+    arg_func_signalture.push_back(Builder.getInt32Ty());
+    arg_func_signalture.push_back(Builder.getInt32Ty());
+    arg_func_signalture.push_back(Builder.getDoubleTy());
+    Constant *hookStoreFunc;
+    hookStoreFunc = M.getOrInsertFunction(
+        "__storeDouble",
+        FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
+
+    arg_func_signalture.push_back(Builder.getInt64Ty());
+    Constant *hookDoubleArrayFunc;
+    hookDoubleArrayFunc = M.getOrInsertFunction(
+        "__storeDoubleArrayElement",
+        FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
+
     for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
       Instruction &I = *ii;
 
@@ -516,18 +543,80 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
       if (I.getOpcode() == Instruction::Load) {
         Type *opType = I.getOperand(0)->getType();
-        // errs() << "I.name " << I.getName() << '\n';
         if (opType->isPointerTy() &&
             opType->getPointerElementType()->isDoubleTy()) {
-          // errs() << "good"<< '\n';
           MDNode *N = MDNode::get(
               M.getContext(),
               MDString::get(M.getContext(), I.getOperand(0)->getName()));
           I.setMetadata("fp", N);
-          // N->print(errs());
-          // errs() << '\n';
+          continue;
         }
 
+        // %.reload30 = load [2 x double]** %.reg2mem26
+        // %50 = bitcast [2 x double]* %.reload30 to double*, !dbg !64
+        // %51 = getelementptr double* %50, i64 0, !dbg !64
+        // store double %49, double* %51, align 8, !dbg !64
+        // IF type is [2 x double]**
+        if (I.getOperand(0)->getType()->isPointerTy() &&
+            I.getOperand(0)
+                ->getType()
+                ->getPointerElementType()
+                ->isPointerTy() &&
+            I.getOperand(0)
+                ->getType()
+                ->getPointerElementType()
+                ->getPointerElementType()
+                ->isArrayTy() &&
+            I.getOperand(0)
+                ->getType()
+                ->getPointerElementType()
+                ->getPointerElementType()
+                ->getArrayElementType()
+                ->isDoubleTy()) {
+          // errs() << "Find load [n x double]** instruction\n";
+          if (isa<BitCastInst>(I.getNextNode()) &&
+              isa<GetElementPtrInst>(I.getNextNode()->getNextNode()) &&
+              isa<StoreInst>(I.getNextNode()->getNextNode()->getNextNode())) {
+            // errs() << "Find store double vector instruction\n";
+            Instruction *get_element_inst = I.getNextNode()->getNextNode();
+            Value *array_index = get_element_inst->getOperand(1);
+            assert(array_index->getType()->isIntegerTy());
+            Instruction *store_inst =
+                I.getNextNode()->getNextNode()->getNextNode();
+
+            if (I.getOperand(0)->getName().startswith("xzFP_")) {
+              errs() << "Find store double vector instruction\n";
+              errs() << B.getValueID() << "\n";
+              StringRef double_array_name =
+                  I.getOperand(0)->getName().split("_").second;
+
+              assert(!double_array_name.empty());
+              assert(store_inst->getOperand(0)->getType()->isDoubleTy());
+              Builder.SetInsertPoint(store_inst);
+              Value *value_double_array_name =
+                  createGlobalStringPtrIfNotExist(double_array_name, Builder);
+
+              SmallVector<Value *, 6> all_arg;
+              Value *value_from_name_arg = createGlobalStringPtrIfNotExist(
+                  store_inst->getOperand(0)->getName(), Builder);
+              all_arg.push_back(value_from_name_arg);
+              all_arg.push_back(value_double_array_name);
+              all_arg.push_back(Builder.getInt32(func_id));
+              all_arg.push_back(
+                  Builder.getInt32(store_inst->getDebugLoc().getLine()));
+              all_arg.push_back(store_inst->getOperand(0));
+              all_arg.push_back(array_index);
+
+              Instruction *newInst = Builder.CreateCall(
+                  hookDoubleArrayFunc, makeArrayRef<Value *>(all_arg));
+              ii++;
+              ii++;
+              ii++;
+              ii++;
+              ii++;
+            }
+          }
+        }
         continue;
       }
       if (I.getOpcode() == Instruction::Store) {
@@ -550,18 +639,18 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
             LLVMContext &Context = M.getContext();
             IRBuilder<> Builder(Context);
-            Builder.SetInsertPoint(&I);
-
-            SmallVector<Type *, 2> arg_vector;
-            arg_vector.push_back(Builder.getInt8PtrTy());
-            arg_vector.push_back(Builder.getInt8PtrTy());
-            arg_vector.push_back(Builder.getInt32Ty());
-            arg_vector.push_back(Builder.getInt32Ty());
-            arg_vector.push_back(Builder.getDoubleTy());
+            SmallVector<Type *, 5> arg_store_double;
+            arg_store_double.push_back(Builder.getInt8PtrTy());
+            arg_store_double.push_back(Builder.getInt8PtrTy());
+            arg_store_double.push_back(Builder.getInt32Ty());
+            arg_store_double.push_back(Builder.getInt32Ty());
+            arg_store_double.push_back(Builder.getDoubleTy());
             Constant *hookStoreFunc;
             hookStoreFunc = M.getOrInsertFunction(
-                "__storeDouble",
-                FunctionType::get(Builder.getVoidTy(), arg_vector, false));
+                "__storeDouble", FunctionType::get(Builder.getVoidTy(),
+                                                   arg_store_double, false));
+
+            Builder.SetInsertPoint(&I);
 
             Use &use_arg1 = I.getOperandUse(0);
             StringRef name_arg1;
