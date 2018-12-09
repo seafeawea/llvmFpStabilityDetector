@@ -5,6 +5,7 @@
 #include <map>
 #include <math.h>
 #include <mpfr.h>
+#include <set>
 #include <sstream>
 #include <stdint.h>
 #include <stdio.h>
@@ -37,24 +38,42 @@ public:
     double value;
     mpfr_t shadow_value;
     int32_t depth;
-    float valid_bits_num;
-    float sum_relative_error;
-    float cur_relative_error;
+    int32_t valid_bits;
+    int32_t bits_canceled_by_this_instruction;
+    int32_t cancelled_badness_bits;
+    int32_t max_cancelled_badness_bits;
+    int32_t line;
+    double sum_relative_error;
+    double cur_relative_error;
+    double real_error_to_shadow;
+    double relative_error_to_shadow;
     
-    FpNode* max_relative_error_node;
+    FpNode* max_cancelled_badness_node;
     FpNode* first_arg;
     FpNode* second_arg;
 
     FpNode() {
         mpfr_inits2(PREC, shadow_value, (mpfr_ptr) 0);
+        value = 0.0;
+        sum_relative_error = cur_relative_error = real_error_to_shadow = relative_error_to_shadow = 0.0;
+        first_arg = second_arg = NULL;
+        max_cancelled_badness_node = this;
+        depth = 1;
+        valid_bits = 53;
+        bits_canceled_by_this_instruction = 0;
+        cancelled_badness_bits = 0;
+        max_cancelled_badness_bits = 0;
+        line = 0;
     }
 
     FpNode(const FpNode & f) {
         value = f.value;
         mpfr_inits2(PREC, shadow_value, (mpfr_ptr) 0);
         mpfr_copysign(shadow_value, f.shadow_value, f.shadow_value, MPFR_RNDN);
+        valid_bits = f.valid_bits;
         double first = mpfr_get_d(shadow_value, MPFR_RNDN);
         double second = mpfr_get_d(f.shadow_value, MPFR_RNDN);
+        max_cancelled_badness_node = this;
         if(isnan(first) && isnan(second))
             return;
         if(first != second) {
@@ -68,17 +87,39 @@ public:
     }
 };
 
-FpNode const_arg1;
-FpNode const_arg2;
-FpNode t0;
+class FloatInstructionInfo {
+public:
+    enum FOPType {
+        kFloatAdd=0,
+        kFloatSub,
+        kFloatMul,
+        kFloatDiv,
+        kDoubleAdd,
+        kDoubleSub,
+        kDoubleMul,
+        kDoubleDiv
+    };
 
-__attribute__((constructor))
-void fp_init()
-{
-    //mpfr_inits2(PREC, const_arg1.shadow_value, const_arg2.shadow_value, t0.shadow_value, (mpfr_ptr) 0);
-    //mpfr_set_d(t0.shadow_value, 0.0001, MPFR_RNDN);
+    FloatInstructionInfo() {}
+
+    FloatInstructionInfo(int32_t line, FOPType fop_type)
+        : line_(line), 
+          fop_type_(fop_type) {
+        avg_relative_error_ = max_relative_error_ = 0.0;
+    }
+//private:
+    int32_t line_;
+    FOPType fop_type_;
+    double avg_relative_error_;
+    double max_relative_error_;
+    FloatInstructionInfo* max_relative_error_from_;
+    int64_t sum_of_cancelled_badness_bits_;
+    int64_t execute_count_;
+};
+
+inline double computeDoubleRelativeError(double value, double shadow_back_value) {
+    return fabs((value - shadow_back_value)/max(fabs(shadow_back_value), 0.00001));
 }
-//mpfr_inits2(PREC, const_arg1.shadow_value, const_arg2.shadow_value, (mpfr_ptr) 0);
 
 map<string, FpNode> double_const_node_map;
 
@@ -92,6 +133,11 @@ public:
     map<int32_t,int32_t> line_and_count; 
 
     map<string, vector<FpNode> > fp_node_map;
+
+    map<string, FloatInstructionInfo> fp_instruction_Info_map;
+
+    //set<string> 
+
 };
 
 static map<int32_t, FunctionFloatErrorInfo> all_function_info;
@@ -209,15 +255,17 @@ FpNode* createConstantDoubleFPNodeIfNotExists(double val) {
         node = &(double_const_node_map[value_str]);
         node->value = val;
         mpfr_set_d(node->shadow_value, val, MPFR_RNDN);
+        node->depth = 1;
+        node->valid_bits = 53;  // suppose constant always accurate 
     }
     return &(double_const_node_map[value_str]);
 }
 
 extern "C"
-void __storeDouble(char* from, char* to, int32_t func_id, double from_val) {
+void __storeDouble(char* from, char* to, int32_t func_id, int32_t line, double from_val) {
 	printf("store %s = %s, func_id=%d, from_val=%f\n", to, from, func_id, from_val);
 
-    map<string, vector<FpNode> >& fp_node_map = all_function_info[0].fp_node_map;
+    map<string, vector<FpNode> >& fp_node_map = all_function_info[func_id].fp_node_map;
 
     string from_name_str(from);
     string to_name_str(to);
@@ -230,6 +278,9 @@ void __storeDouble(char* from, char* to, int32_t func_id, double from_val) {
         from_node = &(fp_node_map[from_name_str].back());
         from_node->value = from_val;
         mpfr_set_d(from_node->shadow_value, from_val, MPFR_RNDN);
+        from_node->depth = 1;
+        from_node->valid_bits = 53;
+        from_node->line = line;
     } else {
         from_node = &(fp_node_map[from_name_str].back());
     }
@@ -242,10 +293,19 @@ void __storeDouble(char* from, char* to, int32_t func_id, double from_val) {
     to_node = &(fp_node_map[to_name_str].back());
     to_node->value = from_node->value;
     mpfr_copysign(to_node->shadow_value, from_node->shadow_value, from_node->shadow_value, MPFR_RNDN);
-    to_node->first_arg = from_node;
+    to_node->first_arg = from_node->first_arg;
+    to_node->second_arg = from_node->second_arg;
+    to_node->depth = from_node->depth;
+    to_node->valid_bits = from_node->valid_bits;
+    to_node->line = line;
+    to_node->max_cancelled_badness_node = from_node->max_cancelled_badness_node;
+    to_node->max_cancelled_badness_bits= from_node->max_cancelled_badness_bits;
+    to_node->bits_canceled_by_this_instruction = from_node->bits_canceled_by_this_instruction;
+    to_node->real_error_to_shadow = from_node->real_error_to_shadow;
+    to_node->relative_error_to_shadow = from_node->relative_error_to_shadow;
 }
 
-FpNode* getArgNode(int32_t func_id, char* arg_name, double value) {
+FpNode* getArgNode(int32_t func_id, int32_t line, char* arg_name, double value) {
     string arg_name_str(arg_name);
     map<string, vector<FpNode> >& fp_node_map = all_function_info[func_id].fp_node_map;
 
@@ -258,15 +318,109 @@ FpNode* getArgNode(int32_t func_id, char* arg_name, double value) {
         arg_node = &(fp_node_map[arg_name_str].back());
         arg_node->value = value;
         mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
+        arg_node->depth = 1;
+        arg_node->line = line;
     } else {
         arg_node = &(fp_node_map[arg_name_str].back());   // just get the lastest node
+        assert(arg_node->value == value && "get arg_node value shoule be equal to arg value");
     }
 
     return arg_node;
 }
 
+int32_t getDoubleValidBits(double a, double b) {
+    int a_exp, b_exp;
+    double a_significand, b_significand;
+    a_significand = frexp (a , &a_exp);
+    b_significand = frexp (b , &b_exp);
+    if (a_exp != b_exp) {
+        return 0;
+    } else {
+        if (a_significand == b_significand) {
+            return 53;
+        } else {
+            int diff_exp;
+            double diff_significand;
+            diff_significand = frexp (a - b , &diff_exp);
+            return min(53, abs(b_exp - diff_exp));
+        }
+    }
+}
+
+int32_t getDoubleExponenet(double value) {
+    int exp;
+    frexp (value , &exp);
+    return exp;
+}
+
+void printResultNodePath(const FpNode& result_node) {
+    int32_t cur_depth = result_node.depth;
+    const FpNode* cur_node = &result_node;
+    cout << "-------Cancellation Error Trace-------" << endl;
+    while(cur_depth > 1) {
+        cout << "line:" << cur_node->line << " | Valid Bit: " << cur_node->valid_bits << endl;
+        if (cur_node->second_arg == NULL) {
+            cur_node = cur_node->first_arg;
+            cur_depth = cur_node->depth;
+            continue;
+        } else {
+            if(cur_node->first_arg->valid_bits > cur_node->second_arg->valid_bits) {
+                cur_node = cur_node->second_arg;
+            } else {
+                cur_node = cur_node->first_arg;
+            }
+            cur_depth = cur_node->depth;
+        }
+    }
+    cout << "line:" << cur_node->line << " | Valid Bit: " << cur_node->valid_bits << endl;
+    cout << "-------End-------" << endl;
+}
+
+void updataResultNode(FpNode* result_node) {
+    FpNode* a_node = result_node->first_arg;
+    FpNode* b_node = result_node->second_arg;
+    double result_shadow_back_value = mpfr_get_d(result_node->shadow_value, MPFR_RNDN);
+    result_node->real_error_to_shadow = result_shadow_back_value - result_node->value;
+    result_node->relative_error_to_shadow = computeDoubleRelativeError(result_node->value, result_shadow_back_value);
+    result_node->depth = max(a_node->depth, b_node->depth) + 1;
+
+    cout << result_node->value << " --- " << result_shadow_back_value  << endl;
+    result_node->valid_bits = getDoubleValidBits(result_node->value, result_shadow_back_value);
+
+    result_node->bits_canceled_by_this_instruction = max(getDoubleExponenet(a_node->value), getDoubleExponenet(b_node->value)) - getDoubleExponenet(result_node->value);
+    result_node->cancelled_badness_bits = 1 + result_node->bits_canceled_by_this_instruction - min(a_node->valid_bits, b_node->valid_bits);
+    result_node->max_cancelled_badness_bits = result_node->cancelled_badness_bits;
+    if (result_node->max_cancelled_badness_bits > a_node->max_cancelled_badness_bits && 
+            result_node->max_cancelled_badness_bits > b_node->max_cancelled_badness_bits) {
+        result_node->max_cancelled_badness_node = result_node;
+    } else if (a_node->max_cancelled_badness_bits > b_node->max_cancelled_badness_bits){
+        result_node->max_cancelled_badness_bits = a_node->cancelled_badness_bits;
+        result_node->max_cancelled_badness_node = a_node->max_cancelled_badness_node;
+    } else {
+        result_node->max_cancelled_badness_bits = b_node->cancelled_badness_bits;
+        result_node->max_cancelled_badness_node = b_node->max_cancelled_badness_node;
+    }
+
+    if (result_node->cancelled_badness_bits > 0) {
+        cout << " Catastrophic Cancellation in fsub, line:" 
+            << result_node->line 
+            << " ,origin from line:" 
+            << result_node->max_cancelled_badness_node->line 
+            << endl;
+        printResultNodePath(*result_node);
+    } else if (result_node->cancelled_badness_bits > -15){
+        cout << " Slightly Cancellation in fsub, line:" 
+            << result_node->line 
+            << " ,origin from line:" 
+            << result_node->max_cancelled_badness_node->line 
+            << endl;
+        printResultNodePath(*result_node);
+    }
+}
+
 extern "C"
 double _fp_debug_doubleadd(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+
     double r = a + b;
     map<string, vector<FpNode> >& fp_node_map = all_function_info[func_id].fp_node_map;
     string a_name_str(a_name);
@@ -275,8 +429,8 @@ double _fp_debug_doubleadd(double a, double b, int32_t func_id, int32_t line, ch
 
     FpNode* a_node;
     FpNode* b_node;
-    a_node = getArgNode(func_id, a_name, a);
-    b_node = getArgNode(func_id, b_name, b);
+    a_node = getArgNode(func_id, line, a_name, a);
+    b_node = getArgNode(func_id, line, b_name, b);
 
     if (fp_node_map.find(result_name_str) == fp_node_map.end()) {
         fp_node_map.insert(pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
@@ -287,12 +441,91 @@ double _fp_debug_doubleadd(double a, double b, int32_t func_id, int32_t line, ch
     result_node->value = r;
     result_node->first_arg = a_node;
     result_node->second_arg = b_node;
+    result_node->line = line;
     //mpfr_inits2(PREC, result_node->shadow_value, (mpfr_ptr) 0);
     mpfr_add(result_node->shadow_value, a_node->shadow_value, b_node->shadow_value, MPFR_RNDN);
 
+    updataResultNode(result_node);
+/*
+    int result_value_exp, result_shadow_back_value_exp;
+    double result_value_significand, result_shadow_back_value_significand;
+    result_value_significand = frexp (result_node->value , &result_value_exp);
+    result_shadow_back_value_exp = frexp (result_shadow_back_value , &result_shadow_back_value_exp);
+    if (result_value_exp != result_shadow_back_value_exp) {
+        result_node->valid_bits = 0;
+    } else {
+        if (result_value_significand == result_shadow_back_value_significand) {
+            result_node->valid_bits = 53;
+        } else {
+            int diff_exp;
+            double diff_significand;
+            diff_significand = frexp (result_node->real_error_to_shadow , &diff_exp);
+            result_node->valid_bits = min(53, abs(result_shadow_back_value_exp - diff_exp));
+        }
+    }
+*/
+
     char debug_str[50];
     mpfrToString(debug_str, &(result_node->shadow_value));
-    cout << "fadd result:" << debug_str << endl;
+    cout << "fadd result:" << debug_str << " | cancel bits:" << result_node->bits_canceled_by_this_instruction << " | canceled badness bits:" << result_node->cancelled_badness_bits<< endl;
+    
+
+
+    map<string, FloatInstructionInfo>& fp_instruction_Info_map = all_function_info[func_id].fp_instruction_Info_map;
+    // result_name is instruction name, for llvm use SSA
+    FloatInstructionInfo* cur_fop_info;
+    if (fp_instruction_Info_map.find(result_name_str) == fp_instruction_Info_map.end()) {
+        fp_instruction_Info_map.insert(pair<string, 
+                                            FloatInstructionInfo>(result_name_str, 
+                                                                  FloatInstructionInfo(line, 
+                                                                                       FloatInstructionInfo::kDoubleAdd)));
+        cur_fop_info = &fp_instruction_Info_map[result_name_str];
+    } else {
+        cur_fop_info = &fp_instruction_Info_map[result_name_str];
+    }
+    cur_fop_info->execute_count_++;
+    cur_fop_info->sum_of_cancelled_badness_bits_ += result_node->cancelled_badness_bits;
+    if (result_node->cur_relative_error > cur_fop_info->max_relative_error_) {
+        cur_fop_info->max_relative_error_ = result_node->cur_relative_error;
+        //cur_fop_info->max_relative_error_from_ = result_node->
+    }
+
     return r;
 }
 
+extern "C"
+double _fp_debug_doublesub(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+
+    double r = a - b;
+    map<string, vector<FpNode> >& fp_node_map = all_function_info[func_id].fp_node_map;
+    string a_name_str(a_name);
+    string b_name_str(b_name);
+    string result_name_str(result_name);
+
+    FpNode* a_node;
+    FpNode* b_node;
+    a_node = getArgNode(func_id, line, a_name, a);
+    b_node = getArgNode(func_id, line, b_name, b);
+
+    if (fp_node_map.find(result_name_str) == fp_node_map.end()) {
+        fp_node_map.insert(pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+    } 
+    fp_node_map[result_name_str].push_back(FpNode());
+    
+    FpNode* result_node = &(fp_node_map[result_name_str].back());
+    result_node->value = r;
+    result_node->first_arg = a_node;
+    result_node->second_arg = b_node;
+    result_node->line = line;
+    //mpfr_inits2(PREC, result_node->shadow_value, (mpfr_ptr) 0);
+    mpfr_sub(result_node->shadow_value, a_node->shadow_value, b_node->shadow_value, MPFR_RNDN);
+
+    updataResultNode(result_node);
+
+    char debug_str[50];
+    mpfrToString(debug_str, &(result_node->shadow_value));
+    cout << "fsub result:" << debug_str << " | cancel bits:" << result_node->bits_canceled_by_this_instruction << " | canceled badness bits:" << result_node->cancelled_badness_bits<< endl;
+    
+
+    return r;
+}
