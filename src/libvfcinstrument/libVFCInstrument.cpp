@@ -254,9 +254,7 @@ struct VfclibInst : public ModulePass {
   Value *createGlobalStringPtrIfNotExist(StringRef sf, IRBuilder<> &Builder) {
     std::string s = sf.str();
     if (created_all_global_str.find(s) == created_all_global_str.end()) {
-      errs() << __LINE__ << s << "\n";
       Value *global_string = Builder.CreateGlobalStringPtr(sf);
-      errs() << __LINE__ << "\n";
       created_all_global_str.insert(
           std::pair<std::string, Value *>(s, global_string));
     }
@@ -336,6 +334,7 @@ struct VfclibInst : public ModulePass {
     } else if (baseType->isFloatTy()) {
       baseTypeName = "float";
     } else {
+      I->print(errs());
       errs() << "Unsupported operand type: " << *opType << "\n";
       // assert(0);
       return NULL;
@@ -389,27 +388,15 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       Value *arg_ptr = CREATE_STRUCT_GEP(mca_interface_type,
                                          current_mca_interface, fct_position);
       Value *fct_ptr = Builder.CreateLoad(arg_ptr, "");
-      // errs() << '\n';
-      // arg_ptr->print(errs());
-      // errs() << '\n';
-      // fct_ptr->print(errs());
-      // errs() << '\n';
 
-      // Create a call instruction. It
-      // will _replace_ I after it is returned.
-      /*Instruction *newInst = CREATE_CALL4(
-          fct_ptr,
-          I->getOperand(0),
-          I->getOperand(1),
-          Builder.getInt32(func_id),
-          Builder.getInt32(line));
-      */
-
-      // const char* arg1 = I->op_begin()->get()->
-      Use &use_arg1 = I->getOperandUse(0);
-      StringRef name_arg1 = getFloatArgName(use_arg1);
-      Use &use_arg2 = I->getOperandUse(1);
-      StringRef name_arg2 = getFloatArgName(use_arg2);
+      // Use &use_arg1 = I->getOperandUse(0);
+      // StringRef name_arg1 = getFloatArgName(use_arg1);
+      Value *value_arg1 = I->getOperand(0);
+      StringRef name_arg1 = value_arg1->getName();
+      // Use &use_arg2 = I->getOperandUse(1);
+      // StringRef name_arg2 = getFloatArgName(use_arg2);
+      Value *value_arg2 = I->getOperand(1);
+      StringRef name_arg2 = value_arg2->getName();
 
       Value *value_name_arg1 =
           createGlobalStringPtrIfNotExist(name_arg1, Builder);
@@ -516,9 +503,14 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
         FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
 
     arg_func_signalture.push_back(Builder.getInt64Ty());
-    Constant *hookDoubleArrayFunc;
-    hookDoubleArrayFunc = M.getOrInsertFunction(
-        "__storeDoubleArrayElement",
+    Constant *hookDoubleStoreToDoubleArray;
+    hookDoubleStoreToDoubleArray = M.getOrInsertFunction(
+        "__doubleStoreToDoubleArrayElement",
+        FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
+
+    Constant *hookDoubleArrayStoreToDouble;
+    hookDoubleArrayStoreToDouble = M.getOrInsertFunction(
+        "__doubleArrayElementStoreToDouble",
         FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
 
     for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
@@ -526,8 +518,10 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
       Fops opCode = mustReplace(I);
       if (opCode == FOP_IGNORE && I.getOpcode() != Instruction::Load &&
-          I.getOpcode() != Instruction::Store)
+          I.getOpcode() != Instruction::Store &&
+          I.getOpcode() != Instruction::BitCast) {
         continue;
+      }
       /*
             errs() << "----------------------------" << '\n';
             errs() << "I.opCode " << I.getOpcodeName();
@@ -542,20 +536,20 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       DebugLoc loc = I.getDebugLoc();  //.print(rso)
 
       if (I.getOpcode() == Instruction::Load) {
-        Type *opType = I.getOperand(0)->getType();
-        if (opType->isPointerTy() &&
+        // Type *opType = I.getOperand(0)->getType();
+        /* if (opType->isPointerTy() &&
             opType->getPointerElementType()->isDoubleTy()) {
           MDNode *N = MDNode::get(
               M.getContext(),
               MDString::get(M.getContext(), I.getOperand(0)->getName()));
           I.setMetadata("fp", N);
           continue;
-        }
+        } */
 
         // %.reload30 = load [2 x double]** %.reg2mem26
         // %50 = bitcast [2 x double]* %.reload30 to double*, !dbg !64
         // %51 = getelementptr double* %50, i64 0, !dbg !64
-        // store double %49, double* %51, align 8, !dbg !64
+        // load/store double %49, double* %51, align 8, !dbg !64
         // IF type is [2 x double]**
         if (I.getOperand(0)->getType()->isPointerTy() &&
             I.getOperand(0)
@@ -575,24 +569,26 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
                 ->isDoubleTy()) {
           // errs() << "Find load [n x double]** instruction\n";
           if (isa<BitCastInst>(I.getNextNode()) &&
-              isa<GetElementPtrInst>(I.getNextNode()->getNextNode()) &&
-              isa<StoreInst>(I.getNextNode()->getNextNode()->getNextNode())) {
+              isa<GetElementPtrInst>(I.getNextNode()->getNextNode())) {
             // errs() << "Find store double vector instruction\n";
             Instruction *get_element_inst = I.getNextNode()->getNextNode();
             Value *array_index = get_element_inst->getOperand(1);
             assert(array_index->getType()->isIntegerTy());
-            Instruction *store_inst =
-                I.getNextNode()->getNextNode()->getNextNode();
-
-            if (I.getOperand(0)->getName().startswith("xzFP_")) {
+            if (isa<StoreInst>(I.getNextNode()->getNextNode()->getNextNode())) {
+              Instruction *store_inst =
+                  I.getNextNode()->getNextNode()->getNextNode();
+              if (!store_inst->getOperand(0)->getType()->isDoubleTy()) continue;
               errs() << "Find store double vector instruction\n";
-              errs() << B.getValueID() << "\n";
-              StringRef double_array_name =
-                  I.getOperand(0)->getName().split("_").second;
+              StringRef double_array_name;
+              if (I.getOperand(0)->getName().startswith("xzFP_")) {
+                double_array_name =
+                    I.getOperand(0)->getName().split("_").second;
+              } else {
+                double_array_name = I.getOperand(0)->getName();
+              }
 
               assert(!double_array_name.empty());
-              assert(store_inst->getOperand(0)->getType()->isDoubleTy());
-              Builder.SetInsertPoint(store_inst);
+              Builder.SetInsertPoint(store_inst->getNextNode());
               Value *value_double_array_name =
                   createGlobalStringPtrIfNotExist(double_array_name, Builder);
 
@@ -607,19 +603,73 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
               all_arg.push_back(store_inst->getOperand(0));
               all_arg.push_back(array_index);
 
-              Instruction *newInst = Builder.CreateCall(
-                  hookDoubleArrayFunc, makeArrayRef<Value *>(all_arg));
-              ii++;
-              ii++;
-              ii++;
-              ii++;
-              ii++;
+              // Instruction *newInst =
+              Builder.CreateCall(hookDoubleStoreToDoubleArray,
+                                 makeArrayRef<Value *>(all_arg));
+              int forward_step = 4;
+              while (forward_step--) ii++;
+
+              //%tmp94 = load double* %tmp92
+            } else if (isa<LoadInst>(
+                           I.getNextNode()->getNextNode()->getNextNode())) {
+              Instruction *load_inst =
+                  I.getNextNode()->getNextNode()->getNextNode();
+              if (!load_inst->getType()->isDoubleTy()) continue;
+              errs() << "Find load double vector instruction\n";
+              // load_inst->print(errs());
+              StringRef double_array_name;
+              if (I.getOperand(0)->getName().startswith("xzFP_")) {
+                double_array_name =
+                    I.getOperand(0)->getName().split("_").second;
+              } else {
+                double_array_name = I.getOperand(0)->getName();
+              }
+
+              Builder.SetInsertPoint(load_inst->getNextNode());
+              Value *value_double_array_name =
+                  createGlobalStringPtrIfNotExist(double_array_name, Builder);
+
+              SmallVector<Value *, 6> all_arg;
+              Value *value_to_name_arg = createGlobalStringPtrIfNotExist(
+                  load_inst->getName(), Builder);
+              all_arg.push_back(value_double_array_name);
+              all_arg.push_back(value_to_name_arg);
+              all_arg.push_back(Builder.getInt32(func_id));
+              all_arg.push_back(
+                  Builder.getInt32(load_inst->getDebugLoc().getLine()));
+              all_arg.push_back(load_inst);
+              all_arg.push_back(array_index);
+
+              // Instruction *newInst =
+              Builder.CreateCall(hookDoubleArrayStoreToDouble,
+                                 makeArrayRef<Value *>(all_arg));
+              int forward_step = 4;
+              while (forward_step--) ii++;
             }
           }
+
+          // simple %aaa = load double* bbb
+        } else if (I.getOperand(0)->getType()->isPointerTy() &&
+                   I.getOperand(0)
+                       ->getType()
+                       ->getPointerElementType()
+                       ->isDoubleTy()) {
+          Builder.SetInsertPoint(I.getNextNode());
+
+          Value *value_from_name_arg = createGlobalStringPtrIfNotExist(
+              I.getOperand(0)->getName(), Builder);
+          Value *value_to_name_arg =
+              createGlobalStringPtrIfNotExist(I.getName(), Builder);
+
+          Builder.CreateCall5(hookStoreFunc, value_from_name_arg,
+                              value_to_name_arg, Builder.getInt32(func_id),
+                              Builder.getInt32(I.getDebugLoc().getLine()), &I,
+                              "");
+          ii++;
         }
         continue;
-      }
-      if (I.getOpcode() == Instruction::Store) {
+
+      } else if (I.getOpcode() == Instruction::Store) {
         if (I.getNumOperands() == 2) {
           Type *opType1 = I.getOperand(0)->getType();
           Type *opType2 = I.getOperand(1)->getType();
@@ -645,16 +695,12 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
             arg_store_double.push_back(Builder.getInt32Ty());
             arg_store_double.push_back(Builder.getInt32Ty());
             arg_store_double.push_back(Builder.getDoubleTy());
-            Constant *hookStoreFunc;
-            hookStoreFunc = M.getOrInsertFunction(
-                "__storeDouble", FunctionType::get(Builder.getVoidTy(),
-                                                   arg_store_double, false));
 
-            Builder.SetInsertPoint(&I);
+            Builder.SetInsertPoint(I.getNextNode());
 
-            Use &use_arg1 = I.getOperandUse(0);
+            Value *value_arg1 = I.getOperand(0);
             StringRef name_arg1;
-            if (isa<Instruction>(use_arg1)) {
+            /* if (isa<Instruction>(use_arg1)) {
               Instruction *I_arg = cast<Instruction>(use_arg1);
               switch (I_arg->getOpcode()) {
                 case Instruction::Load:
@@ -672,7 +718,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
                   break;
               }
             } else if (cast<Value>(use_arg1)->getValueID() ==
-                       Value::ConstantFPVal) {
+                       Value::ConstantFPVal) { */
+            if (value_arg1->getValueID() == Value::ConstantFPVal) {
               name_arg1 = StringRef("__const__value__");
             } else {
               name_arg1 = I.getOperand(0)->getName();
@@ -682,20 +729,105 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
                 createGlobalStringPtrIfNotExist(name_arg1, Builder);
             Value *value_name_arg2 = createGlobalStringPtrIfNotExist(
                 I.getOperand(1)->getName(), Builder);
-            Value *value_arg1 = createGlobalStringPtrIfNotExist(
-                I.getOperand(1)->getName(), Builder);
+            // Value *value_arg1 = createGlobalStringPtrIfNotExist(
+            //    I.getOperand(1)->getName(), Builder);
 
-            Instruction *newInst = Builder.CreateCall5(
-                hookStoreFunc, value_name_arg1, value_name_arg2,
-                Builder.getInt32(func_id), Builder.getInt32(loc.getLine()),
-                I.getOperand(0), "");
+            Builder.CreateCall5(hookStoreFunc, value_name_arg1, value_name_arg2,
+                                Builder.getInt32(func_id),
+                                Builder.getInt32(loc.getLine()),
+                                I.getOperand(0), "");
           }
         }
+        continue;
 
+        // %tmp120 = bitcast [3 x double]* %b to double*
+      } else if (I.getOpcode() == Instruction::BitCast) {
+        if (I.getType()->isPointerTy() &&
+            I.getType()->getPointerElementType()->isDoubleTy() &&
+            I.getOperand(0)->getType()->isPointerTy() &&
+            I.getOperand(0)->getType()->getPointerElementType()->isArrayTy() &&
+            I.getOperand(0)
+                ->getType()
+                ->getPointerElementType()
+                ->getArrayElementType()
+                ->isDoubleTy()) {
+          // %tmp121 = getelementptr double* %tmp120, i64 1, !dbg !68
+          // %tmp122 = load double* %tmp121, align 8, !dbg !68
+          if (isa<GetElementPtrInst>(I.getNextNode())) {
+            Instruction *get_element_inst = I.getNextNode();
+            Value *array_index = get_element_inst->getOperand(1);
+            if (isa<LoadInst>(get_element_inst->getNextNode())) {
+              Instruction *load_inst = get_element_inst->getNextNode();
+              if (&I == get_element_inst->getOperand(0) &&
+                  get_element_inst == load_inst->getOperand(0)) {
+                Builder.SetInsertPoint(load_inst->getNextNode());
+                StringRef double_array_name = I.getOperand(0)->getName();
+                Value *value_double_array_name =
+                    createGlobalStringPtrIfNotExist(double_array_name, Builder);
+                Value *value_to_name_arg = createGlobalStringPtrIfNotExist(
+                    load_inst->getName(), Builder);
+
+                SmallVector<Value *, 6> all_arg;
+                all_arg.push_back(value_double_array_name);
+                all_arg.push_back(value_to_name_arg);
+                all_arg.push_back(Builder.getInt32(func_id));
+                all_arg.push_back(
+                    Builder.getInt32(load_inst->getDebugLoc().getLine()));
+                all_arg.push_back(load_inst);
+                all_arg.push_back(array_index);
+                Builder.CreateCall(hookDoubleArrayStoreToDouble,
+                                   makeArrayRef<Value *>(all_arg));
+                int forward_step = 3;
+                while (forward_step--) ii++;
+              }
+            } else if (isa<StoreInst>(get_element_inst->getNextNode())) {
+              Instruction *store_inst = get_element_inst->getNextNode();
+              if (&I == get_element_inst->getOperand(0) &&
+                  get_element_inst == store_inst->getOperand(1)) {
+                I.print(errs());
+                Builder.SetInsertPoint(store_inst->getNextNode());
+                StringRef double_array_name = I.getOperand(0)->getName();
+                Value *value_double_array_name =
+                    createGlobalStringPtrIfNotExist(double_array_name, Builder);
+                Value *value_from_name_arg = createGlobalStringPtrIfNotExist(
+                    store_inst->getOperand(0)->getName(), Builder);
+
+                SmallVector<Value *, 6> all_arg;
+                all_arg.push_back(value_from_name_arg);
+                all_arg.push_back(value_double_array_name);
+                all_arg.push_back(Builder.getInt32(func_id));
+                all_arg.push_back(
+                    Builder.getInt32(store_inst->getDebugLoc().getLine()));
+                all_arg.push_back(store_inst->getOperand(0));
+                all_arg.push_back(array_index);
+                Builder.CreateCall(hookDoubleStoreToDoubleArray,
+                                   makeArrayRef<Value *>(all_arg));
+                int forward_step = 3;
+                while (forward_step--) ii++;
+              }
+            }
+          }
+        }
         continue;
       }
 
       // if (VfclibInstVerbose) errs() << "Instrumenting" << I << '\n';
+      /* switch (opCode) {
+        case Instruction::FAdd:
+          I.setName("fadd");
+          break;
+        case Instruction::FSub:
+          I.setName("fsub");
+          break;
+        case Instruction::FMul:
+          I.setName("fmul");
+          break;
+        case Instruction::FDiv:
+          I.setName("fdiv");
+          break;
+        default:
+          break;
+      } */
 
       Instruction *newInst =
           replaceWithMCACall(M, B, &I, opCode, func_id, loc.getLine());
@@ -703,8 +835,27 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       if (newInst == NULL) continue;
       // Remove instruction from parent so it can be
       // inserted in a new context
+
+      switch (I.getOpcode()) {
+        case Instruction::FAdd:
+          newInst->setName("xz_fadd");
+          break;
+        case Instruction::FSub:
+          newInst->setName("xz_fsub");
+          break;
+        case Instruction::FMul:
+          newInst->setName("xz_fmul");
+          break;
+        case Instruction::FDiv:
+          newInst->setName("xz_fdiv");
+          break;
+        default:
+          break;
+      }
+
       if (newInst->getParent() != NULL) newInst->removeFromParent();
       ReplaceInstWithInst(B.getInstList(), ii, newInst);
+
       modified = true;
     }
 

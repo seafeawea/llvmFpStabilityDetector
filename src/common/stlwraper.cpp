@@ -23,7 +23,7 @@ static bool is_write_to_file = (getenv(FILE_TO_PRINT_ERROR_ENV) != NULL);
 
 using namespace std;
 
-template<typename T>
+template <typename T>
 string ConvertToString(T value) {
   stringstream ss;
   ss << value;
@@ -257,7 +257,7 @@ FpNode* createConstantDoubleFPNodeIfNotExists(double val) {
   return &(double_const_node_map[value_str]);
 }
 
-extern "C" void __storeDouble(char* from, char* to, int32_t func_id,
+extern "C" void __storeDouble(const char* from, const char* to, int32_t func_id,
                               int32_t line, double from_val) {
   printf("store %s = %s, func_id=%d, from_val=%f\n", to, from, func_id,
          from_val);
@@ -307,56 +307,22 @@ extern "C" void __storeDouble(char* from, char* to, int32_t func_id,
   to_node->relative_error_to_shadow = from_node->relative_error_to_shadow;
 }
 
-extern "C" void __storeDoubleArrayElement(char* from, char* to, int32_t func_id,
-                                          int32_t line, double from_val,
-                                          int32_t index) {
-  printf("store %s_%d = %s, func_id=%d, from_val=%f\n", to, index, from,
-         func_id, from_val);
-
-  map<string, vector<FpNode> >& fp_node_map =
-      all_function_info[func_id].fp_node_map;
-
-  string from_name_str(from);
+extern "C" void __doubleStoreToDoubleArrayElement(const char* from, const char* to,
+                                          int32_t func_id, int32_t line,
+                                          double from_val, int64_t index) {
   string to_name_str(to);
   to_name_str.append("[" + ConvertToString(index) + "]");
-  FpNode* from_node;
-  if (from_name_str == "__const__value__") {
-    from_node = createConstantDoubleFPNodeIfNotExists(from_val);
-  } else if (fp_node_map.find(from_name_str) == fp_node_map.end()) {
-    fp_node_map.insert(
-        pair<string, vector<FpNode> >(from_name_str, vector<FpNode>()));
-    fp_node_map[from_name_str].push_back(FpNode());
-    from_node = &(fp_node_map[from_name_str].back());
-    from_node->value = from_val;
-    mpfr_set_d(from_node->shadow_value, from_val, MPFR_RNDN);
-    from_node->depth = 1;
-    from_node->valid_bits = 53;
-    from_node->line = line;
-  } else {
-    from_node = &(fp_node_map[from_name_str].back());
-  }
 
-  FpNode* to_node;
-  if (fp_node_map.find(to_name_str) == fp_node_map.end()) {
-    fp_node_map.insert(
-        pair<string, vector<FpNode> >(to_name_str, vector<FpNode>()));
-  }
-  fp_node_map[to_name_str].push_back(FpNode());
-  to_node = &(fp_node_map[to_name_str].back());
-  to_node->value = from_node->value;
-  mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
-                from_node->shadow_value, MPFR_RNDN);
-  to_node->first_arg = from_node->first_arg;
-  to_node->second_arg = from_node->second_arg;
-  to_node->depth = from_node->depth;
-  to_node->valid_bits = from_node->valid_bits;
-  to_node->line = line;
-  to_node->max_cancelled_badness_node = from_node->max_cancelled_badness_node;
-  to_node->max_cancelled_badness_bits = from_node->max_cancelled_badness_bits;
-  to_node->bits_canceled_by_this_instruction =
-      from_node->bits_canceled_by_this_instruction;
-  to_node->real_error_to_shadow = from_node->real_error_to_shadow;
-  to_node->relative_error_to_shadow = from_node->relative_error_to_shadow;
+  __storeDouble(from, to_name_str.c_str(), func_id, line, from_val);
+}
+
+extern "C" void __doubleArrayElementStoreToDouble(const char* from, const char* to,
+                                          int32_t func_id, int32_t line,
+                                          double from_val, int64_t index) {
+  string from_name_str(from);
+  from_name_str.append("[" + ConvertToString(index) + "]");
+
+  __storeDouble(from_name_str.c_str(), to, func_id, line, from_val);
 }
 
 FpNode* getArgNode(int32_t func_id, int32_t line, char* arg_name,
