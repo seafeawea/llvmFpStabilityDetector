@@ -277,7 +277,7 @@ static double _doubleadd(double a, double b, int32_t func_id, int32_t line, char
 
 	// for datafloat analysis
 
-	printf("doubleadd %s = %s + %s\n", result_name, a_name, b_name);
+	//printf("doubleadd %s = %s + %s\n", result_name, a_name, b_name);
 
 	return _fp_debug_doubleadd(a, b, func_id, line, a_name, b_name, result_name);
 	
@@ -303,7 +303,7 @@ static double _doublesub(double a, double b, int32_t func_id, int32_t line, char
 	return d;
 	*/
 
-	printf("doublesub %s = %s - %s\n", result_name, a_name, b_name);
+	//printf("doublesub %s = %s - %s\n", result_name, a_name, b_name);
 
     return _fp_debug_doublesub(a, b, func_id, line, a_name, b_name, result_name);
 	//double c = a - b;
@@ -316,12 +316,16 @@ static double _doublesub(double a, double b, int32_t func_id, int32_t line, char
 }
 
 static double _doublemul(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	return a * b;
+	return _fp_debug_doublemul(a, b, func_id, line, a_name, b_name, result_name);
+	
+	//return a * b;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_MUL);
 }
 
 static double _doublediv(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	return a / b;
+	return _fp_debug_doublediv(a, b, func_id, line, a_name, b_name, result_name);
+	
+	//return a / b;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_DIV);
 }
 

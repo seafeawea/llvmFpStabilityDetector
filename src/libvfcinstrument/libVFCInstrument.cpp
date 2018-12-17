@@ -231,7 +231,7 @@ struct VfclibInst : public ModulePass {
 
     bool modified = false;
     BasicBlock *BBEntry = &F.getEntryBlock();
-    modified |= runOnEntryBlock(M, *BBEntry);
+    runOnEntryBlock(M, *BBEntry);
 
     int32_t func_id = SelectedFunctionSet[F.getName()];
 
@@ -243,6 +243,10 @@ struct VfclibInst : public ModulePass {
         "clearDoubleNodeMap",
         FunctionType::get(Builder.getVoidTy(), arg_vector, false));
     Instruction *newInst = CREATE_CALL(hookFunc, Builder.getInt32(func_id));
+
+    for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
+      relaceFloatOPName(M, *bi, F, func_id);
+    }
 
     for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
       modified |= runOnBasicBlock(M, *bi, F, func_id);
@@ -440,7 +444,7 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
     }
   }
 
-  bool runOnEntryBlock(Module &M, BasicBlock &BBEntry) {
+  void runOnEntryBlock(Module &M, BasicBlock &BBEntry) {
     BasicBlock::iterator I = BBEntry.begin();
     while (isa<AllocaInst>(I)) ++I;
     // now I is the fisrt non-alloca instruction
@@ -482,6 +486,32 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
             continue;
           }
         }
+      }
+    }
+  }
+
+  void relaceFloatOPName(Module &M, BasicBlock &B, Function &F, int32_t func_id){
+    for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
+      Instruction &I = *ii;
+
+      Fops opCode = mustReplace(I);
+      if (opCode == FOP_IGNORE) continue;
+
+      switch (I.getOpcode()) {
+        case Instruction::FAdd:
+          I.setName("xz_fadd");
+          break;
+        case Instruction::FSub:
+          I.setName("xz_fsub");
+          break;
+        case Instruction::FMul:
+          I.setName("xz_fmul");
+          break;
+        case Instruction::FDiv:
+          I.setName("xz_fdiv");
+          break;
+        default:
+          break;
       }
     }
   }
@@ -836,25 +866,14 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       // Remove instruction from parent so it can be
       // inserted in a new context
 
-      switch (I.getOpcode()) {
-        case Instruction::FAdd:
-          newInst->setName("xz_fadd");
-          break;
-        case Instruction::FSub:
-          newInst->setName("xz_fsub");
-          break;
-        case Instruction::FMul:
-          newInst->setName("xz_fmul");
-          break;
-        case Instruction::FDiv:
-          newInst->setName("xz_fdiv");
-          break;
-        default:
-          break;
-      }
-
       if (newInst->getParent() != NULL) newInst->removeFromParent();
+      newInst->takeName(&I);
       ReplaceInstWithInst(B.getInstList(), ii, newInst);
+      //I.replaceAllUsesWith(newInst);
+      //I.eraseFromParent();
+
+      //if (newInst->getParent() != NULL) newInst->removeFromParent();
+      //ReplaceInstWithInst(B.getInstList(), ii, newInst);
 
       modified = true;
     }

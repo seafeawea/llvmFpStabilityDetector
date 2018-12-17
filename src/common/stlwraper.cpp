@@ -23,6 +23,8 @@ static bool is_write_to_file = (getenv(FILE_TO_PRINT_ERROR_ENV) != NULL);
 
 using namespace std;
 
+class FloatInstructionInfo;
+
 template <typename T>
 string ConvertToString(T value) {
   stringstream ss;
@@ -43,21 +45,24 @@ class FpNode {
   int32_t max_cancelled_badness_bits;
   int32_t line;
   double sum_relative_error;
-  double cur_relative_error;
+  // double cur_relative_error;
   double real_error_to_shadow;
   double relative_error_to_shadow;
 
   FpNode* max_cancelled_badness_node;
   FpNode* first_arg;
   FpNode* second_arg;
+  FpNode* relative_bigger_arg;
+  FloatInstructionInfo* fp_info;
 
   FpNode() {
     mpfr_inits2(PREC, shadow_value, (mpfr_ptr)0);
     value = 0.0;
-    sum_relative_error = cur_relative_error = real_error_to_shadow =
-        relative_error_to_shadow = 0.0;
+    sum_relative_error = real_error_to_shadow = relative_error_to_shadow = 0.0;
     first_arg = second_arg = NULL;
     max_cancelled_badness_node = this;
+    relative_bigger_arg = NULL;
+    fp_info = NULL;
     depth = 1;
     valid_bits = 53;
     bits_canceled_by_this_instruction = 0;
@@ -74,6 +79,10 @@ class FpNode {
     double first = mpfr_get_d(shadow_value, MPFR_RNDN);
     double second = mpfr_get_d(f.shadow_value, MPFR_RNDN);
     max_cancelled_badness_node = this;
+    fp_info = f.fp_info;
+    first_arg = f.first_arg;
+    second_arg = f.second_arg;
+    relative_bigger_arg = f.relative_bigger_arg;
     if (isnan(first) && isnan(second)) return;
     if (first != second) {
       cout << "first=" << first << " second=" << second << endl;
@@ -101,15 +110,20 @@ class FloatInstructionInfo {
 
   FloatInstructionInfo(int32_t line, FOPType fop_type)
       : line_(line), fop_type_(fop_type) {
-    avg_relative_error_ = max_relative_error_ = 0.0;
+    avg_relative_error_ = max_relative_error_ = sum_relative_error_ = 0.0;
+    max_relative_error_from_fpinfo = NULL;
   }
   // private:
   int32_t line_;
+  string name_;
   FOPType fop_type_;
   double avg_relative_error_;
   double max_relative_error_;
-  FloatInstructionInfo* max_relative_error_from_;
+  double sum_relative_error_;
+  // FpNode* max_relative_error_from_FpNode;
   int64_t sum_of_cancelled_badness_bits_;
+  const FloatInstructionInfo* max_relative_error_from_fpinfo;
+  double avg_cancelled_badness_bits_;
   int64_t execute_count_;
 };
 
@@ -153,7 +167,7 @@ void writeErrorToStream(ostream& out) {
     out << "=========================" << endl;
     out << "function id = " << ait->first << endl;
     out << "function :" << ait->second.func_name << endl;
-    out << "  Line  | ErrorCount" << endl;
+    /* out << "  Line  | ErrorCount" << endl;
     out << "-------------------------" << endl;
     if (ait->second.line_and_count.size() == 0) {
       out << "No error in here" << endl;
@@ -162,6 +176,22 @@ void writeErrorToStream(ostream& out) {
            it != ait->second.line_and_count.end(); it++) {
         out << " " << it->first << "  | " << it->second << endl;
       }
+    } */
+    out << "  op  | line | avg_relative_error | avg_cancelled_badness_bits | "
+           "Possable cause from"
+        << endl;
+    map<string, FloatInstructionInfo>& func_info =
+        ait->second.fp_instruction_Info_map;
+    for (map<string, FloatInstructionInfo>::iterator fit = func_info.begin();
+         fit != func_info.end(); fit++) {
+      out << fit->first << " | " << fit->second.line_ << " | "
+          << fit->second.avg_relative_error_ << " | "
+          << fit->second.avg_cancelled_badness_bits_;
+      if (fit->second.max_relative_error_from_fpinfo != NULL) {
+        out << " | " << fit->second.max_relative_error_from_fpinfo->name_;
+      }
+
+      out << endl;
     }
     out << "=========================" << endl;
   }
@@ -201,6 +231,13 @@ extern "C" void printFuncErrorInfo(const int32_t func_id) {
 }
 
 extern "C" void clearDoubleNodeMap(int32_t func_id) {
+  // for debug
+  if (is_open_print_float_error) {
+    if (__builtin_expect((remove(PRINT_FLOAT_ERROR_ONCE) == 0), 0)) {
+      printFuncErrorInfoAll();
+    }
+  }
+
   all_function_info[func_id].fp_node_map.clear();
 }
 
@@ -259,8 +296,8 @@ FpNode* createConstantDoubleFPNodeIfNotExists(double val) {
 
 extern "C" void __storeDouble(const char* from, const char* to, int32_t func_id,
                               int32_t line, double from_val) {
-  printf("store %s = %s, func_id=%d, from_val=%f\n", to, from, func_id,
-         from_val);
+  /* printf("store %s = %s, func_id=%d, from_val=%f\n", to, from, func_id,
+         from_val); */
 
   map<string, vector<FpNode> >& fp_node_map =
       all_function_info[func_id].fp_node_map;
@@ -305,20 +342,25 @@ extern "C" void __storeDouble(const char* from, const char* to, int32_t func_id,
       from_node->bits_canceled_by_this_instruction;
   to_node->real_error_to_shadow = from_node->real_error_to_shadow;
   to_node->relative_error_to_shadow = from_node->relative_error_to_shadow;
+  to_node->fp_info = from_node->fp_info;
 }
 
-extern "C" void __doubleStoreToDoubleArrayElement(const char* from, const char* to,
-                                          int32_t func_id, int32_t line,
-                                          double from_val, int64_t index) {
+extern "C" void __doubleStoreToDoubleArrayElement(const char* from,
+                                                  const char* to,
+                                                  int32_t func_id, int32_t line,
+                                                  double from_val,
+                                                  int64_t index) {
   string to_name_str(to);
   to_name_str.append("[" + ConvertToString(index) + "]");
 
   __storeDouble(from, to_name_str.c_str(), func_id, line, from_val);
 }
 
-extern "C" void __doubleArrayElementStoreToDouble(const char* from, const char* to,
-                                          int32_t func_id, int32_t line,
-                                          double from_val, int64_t index) {
+extern "C" void __doubleArrayElementStoreToDouble(const char* from,
+                                                  const char* to,
+                                                  int32_t func_id, int32_t line,
+                                                  double from_val,
+                                                  int64_t index) {
   string from_name_str(from);
   from_name_str.append("[" + ConvertToString(index) + "]");
 
@@ -346,8 +388,22 @@ FpNode* getArgNode(int32_t func_id, int32_t line, char* arg_name,
   } else {
     arg_node =
         &(fp_node_map[arg_name_str].back());  // just get the lastest node
-    assert(arg_node->value == value &&
-           "get arg_node value shoule be equal to arg value");
+    if (arg_node->value != value) {
+      // must be a unknown function which produce the value
+
+      // cout << arg_node->value << " != " << value << endl;
+      // assert(arg_node->value == value &&
+      //        "get arg_node value shoule be equal to arg value");
+
+      fp_node_map.insert(
+          pair<string, vector<FpNode> >(arg_name_str, vector<FpNode>()));
+      fp_node_map[arg_name_str].push_back(FpNode());
+      arg_node = &(fp_node_map[arg_name_str].back());
+      arg_node->value = value;
+      mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
+      arg_node->depth = 1;
+      arg_node->line = 0;
+    }
   }
 
   return arg_node;
@@ -414,7 +470,7 @@ void updataResultNode(FpNode* result_node) {
       computeDoubleRelativeError(result_node->value, result_shadow_back_value);
   result_node->depth = max(a_node->depth, b_node->depth) + 1;
 
-  cout << result_node->value << " --- " << result_shadow_back_value << endl;
+  // cout << result_node->value << " --- " << result_shadow_back_value << endl;
   result_node->valid_bits =
       getDoubleValidBits(result_node->value, result_shadow_back_value);
 
@@ -442,7 +498,13 @@ void updataResultNode(FpNode* result_node) {
         b_node->max_cancelled_badness_node;
   }
 
-  if (result_node->cancelled_badness_bits > 0) {
+  if (a_node->real_error_to_shadow > b_node->real_error_to_shadow) {
+    result_node->relative_bigger_arg = a_node;
+  } else {
+    result_node->relative_bigger_arg = b_node;
+  }
+
+  /* if (result_node->cancelled_badness_bits > 0) {
     cout << " Catastrophic Cancellation in fsub, line:" << result_node->line
          << " ,origin from line:"
          << result_node->max_cancelled_badness_node->line << endl;
@@ -452,6 +514,45 @@ void updataResultNode(FpNode* result_node) {
          << " ,origin from line:"
          << result_node->max_cancelled_badness_node->line << endl;
     printResultNodePath(*result_node);
+  } */
+}
+
+void updateFloatOpInfo(const string& op_name, FpNode* op_node,
+                       const int32_t func_id, const int32_t line) {
+  map<string, FloatInstructionInfo>& fp_instruction_Info_map =
+      all_function_info[func_id].fp_instruction_Info_map;
+  // result_name is instruction name, for llvm use SSA
+  FloatInstructionInfo* cur_fop_info;
+  if (fp_instruction_Info_map.find(op_name) == fp_instruction_Info_map.end()) {
+    fp_instruction_Info_map.insert(pair<string, FloatInstructionInfo>(
+        op_name, FloatInstructionInfo(line, FloatInstructionInfo::kDoubleAdd)));
+    cur_fop_info = &fp_instruction_Info_map[op_name];
+    cur_fop_info->name_ = op_name;
+    //cout << cur_fop_info << endl;
+  } else {
+    cur_fop_info = &fp_instruction_Info_map[op_name];
+  }
+  op_node->fp_info = cur_fop_info;
+  cur_fop_info->execute_count_++;
+  cur_fop_info->sum_of_cancelled_badness_bits_ +=
+      op_node->cancelled_badness_bits;
+  cur_fop_info->sum_relative_error_ += op_node->relative_error_to_shadow;
+  cur_fop_info->avg_relative_error_ =
+      cur_fop_info->sum_relative_error_ / cur_fop_info->execute_count_;
+  cur_fop_info->avg_cancelled_badness_bits_ =
+      (double)(cur_fop_info->sum_of_cancelled_badness_bits_) /
+      (double)(cur_fop_info->execute_count_);
+  if (op_node->relative_error_to_shadow > cur_fop_info->max_relative_error_) {
+    cur_fop_info->max_relative_error_ = op_node->relative_error_to_shadow;
+    // cur_fop_info->max_relative_error_from_ = result_node->
+    // cur_fop_info->max_relative_error_from_FpNode = op_node;
+    if (op_node->relative_bigger_arg != NULL &&
+        op_node->relative_bigger_arg->fp_info != NULL) {
+      //cout << "In line " << __LINE__ << " "
+      //     << op_node->relative_bigger_arg->fp_info << endl;
+      cur_fop_info->max_relative_error_from_fpinfo =
+          op_node->relative_bigger_arg->fp_info;
+    }
   }
 }
 
@@ -506,32 +607,13 @@ extern "C" double _fp_debug_doubleadd(double a, double b, int32_t func_id,
   */
 
   char debug_str[50];
-  mpfrToString(debug_str, &(result_node->shadow_value));
+  /* mpfrToString(debug_str, &(result_node->shadow_value));
   cout << "fadd result:" << debug_str
        << " | cancel bits:" << result_node->bits_canceled_by_this_instruction
        << " | canceled badness bits:" << result_node->cancelled_badness_bits
-       << endl;
+       << endl; */
 
-  map<string, FloatInstructionInfo>& fp_instruction_Info_map =
-      all_function_info[func_id].fp_instruction_Info_map;
-  // result_name is instruction name, for llvm use SSA
-  FloatInstructionInfo* cur_fop_info;
-  if (fp_instruction_Info_map.find(result_name_str) ==
-      fp_instruction_Info_map.end()) {
-    fp_instruction_Info_map.insert(pair<string, FloatInstructionInfo>(
-        result_name_str,
-        FloatInstructionInfo(line, FloatInstructionInfo::kDoubleAdd)));
-    cur_fop_info = &fp_instruction_Info_map[result_name_str];
-  } else {
-    cur_fop_info = &fp_instruction_Info_map[result_name_str];
-  }
-  cur_fop_info->execute_count_++;
-  cur_fop_info->sum_of_cancelled_badness_bits_ +=
-      result_node->cancelled_badness_bits;
-  if (result_node->cur_relative_error > cur_fop_info->max_relative_error_) {
-    cur_fop_info->max_relative_error_ = result_node->cur_relative_error;
-    // cur_fop_info->max_relative_error_from_ = result_node->
-  }
+  updateFloatOpInfo(result_name_str, result_node, func_id, line);
 
   return r;
 }
@@ -568,12 +650,102 @@ extern "C" double _fp_debug_doublesub(double a, double b, int32_t func_id,
 
   updataResultNode(result_node);
 
-  char debug_str[50];
+  /* char debug_str[50];
   mpfrToString(debug_str, &(result_node->shadow_value));
   cout << "fsub result:" << debug_str
        << " | cancel bits:" << result_node->bits_canceled_by_this_instruction
        << " | canceled badness bits:" << result_node->cancelled_badness_bits
-       << endl;
+       << endl; */
+  updateFloatOpInfo(result_name_str, result_node, func_id, line);
+
+  return r;
+}
+
+extern "C" double _fp_debug_doublemul(double a, double b, int32_t func_id,
+                                      int32_t line, char* a_name, char* b_name,
+                                      char* result_name) {
+  double r = a * b;
+  map<string, vector<FpNode> >& fp_node_map =
+      all_function_info[func_id].fp_node_map;
+  string a_name_str(a_name);
+  string b_name_str(b_name);
+  string result_name_str(result_name);
+
+  FpNode* a_node;
+  FpNode* b_node;
+  a_node = getArgNode(func_id, line, a_name, a);
+  b_node = getArgNode(func_id, line, b_name, b);
+
+  if (fp_node_map.find(result_name_str) == fp_node_map.end()) {
+    fp_node_map.insert(
+        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+  }
+  fp_node_map[result_name_str].push_back(FpNode());
+
+  FpNode* result_node = &(fp_node_map[result_name_str].back());
+  result_node->value = r;
+  result_node->first_arg = a_node;
+  result_node->second_arg = b_node;
+  result_node->line = line;
+  // mpfr_inits2(PREC, result_node->shadow_value, (mpfr_ptr) 0);
+  mpfr_mul(result_node->shadow_value, a_node->shadow_value,
+           b_node->shadow_value, MPFR_RNDN);
+
+  updataResultNode(result_node);
+
+  /* char debug_str[50];
+  mpfrToString(debug_str, &(result_node->shadow_value));
+  cout << "fsub result:" << debug_str
+       << " | cancel bits:" << result_node->bits_canceled_by_this_instruction
+       << " | canceled badness bits:" << result_node->cancelled_badness_bits
+       << endl; */
+  map<string, FloatInstructionInfo>& fp_instruction_Info_map =
+      all_function_info[func_id].fp_instruction_Info_map;
+  // result_name is instruction name, for llvm use SSA
+  updateFloatOpInfo(result_name_str, result_node, func_id, line);
+
+  return r;
+}
+
+extern "C" double _fp_debug_doublediv(double a, double b, int32_t func_id,
+                                      int32_t line, char* a_name, char* b_name,
+                                      char* result_name) {
+  double r = a / b;
+  map<string, vector<FpNode> >& fp_node_map =
+      all_function_info[func_id].fp_node_map;
+  string a_name_str(a_name);
+  string b_name_str(b_name);
+  string result_name_str(result_name);
+
+  FpNode* a_node;
+  FpNode* b_node;
+  a_node = getArgNode(func_id, line, a_name, a);
+  b_node = getArgNode(func_id, line, b_name, b);
+
+  if (fp_node_map.find(result_name_str) == fp_node_map.end()) {
+    fp_node_map.insert(
+        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+  }
+  fp_node_map[result_name_str].push_back(FpNode());
+
+  FpNode* result_node = &(fp_node_map[result_name_str].back());
+  result_node->value = r;
+  result_node->first_arg = a_node;
+  result_node->second_arg = b_node;
+  result_node->line = line;
+  // mpfr_inits2(PREC, result_node->shadow_value, (mpfr_ptr) 0);
+  mpfr_div(result_node->shadow_value, a_node->shadow_value,
+           b_node->shadow_value, MPFR_RNDN);
+
+  updataResultNode(result_node);
+
+  /* char debug_str[50];
+  mpfrToString(debug_str, &(result_node->shadow_value));
+  cout << "fsub result:" << debug_str
+       << " | cancel bits:" << result_node->bits_canceled_by_this_instruction
+       << " | canceled badness bits:" << result_node->cancelled_badness_bits
+       << endl; */
+  updateFloatOpInfo(result_name_str, result_node, func_id, line);
 
   return r;
 }
