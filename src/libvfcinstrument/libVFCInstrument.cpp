@@ -126,6 +126,7 @@ struct VfclibInst : public ModulePass {
     // needed here.
 
     SmallVector<Type *, 7> floatArgs, doubleArgs;
+    floatArgs.push_back(Builder.getInt8PtrTy());
     floatArgs.push_back(Builder.getFloatTy());
     floatArgs.push_back(Builder.getFloatTy());
     floatArgs.push_back(Builder.getInt32Ty());
@@ -134,6 +135,7 @@ struct VfclibInst : public ModulePass {
     floatArgs.push_back(Builder.getInt8PtrTy());
     floatArgs.push_back(Builder.getInt8PtrTy());
 
+    doubleArgs.push_back(Builder.getInt8PtrTy());
     doubleArgs.push_back(Builder.getDoubleTy());
     doubleArgs.push_back(Builder.getDoubleTy());
     doubleArgs.push_back(Builder.getInt32Ty());
@@ -242,14 +244,17 @@ struct VfclibInst : public ModulePass {
     Constant *hookFunc = M.getOrInsertFunction(
         "clearDoubleNodeMap",
         FunctionType::get(Builder.getVoidTy(), arg_vector, false));
-    Instruction *newInst = CREATE_CALL(hookFunc, Builder.getInt32(func_id));
+    CREATE_CALL(hookFunc, Builder.getInt32(func_id));
+
+    Instruction *create_map_inst = Builder.CreateCall(M.getOrInsertFunction(
+        "createFpNodeMap", FunctionType::get(Builder.getInt8PtrTy(), false)));
 
     for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
       relaceFloatOPName(M, *bi, F, func_id);
     }
 
     for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
-      modified |= runOnBasicBlock(M, *bi, F, func_id);
+      modified |= runOnBasicBlock(M, *bi, F, func_id, create_map_inst);
     }
     return modified;
   }
@@ -303,7 +308,8 @@ struct VfclibInst : public ModulePass {
   }
 
   Instruction *replaceWithMCACall(Module &M, BasicBlock &B, Instruction *I,
-                                  Fops opCode, int32_t func_id, int32_t line) {
+                                  Fops opCode, int32_t func_id, int32_t line,
+                                  Instruction *create_map_inst) {
     LLVMContext &Context = M.getContext();
     IRBuilder<> Builder(Context);
     StructType *mca_interface_type = getMCAInterfaceType(Builder);
@@ -410,9 +416,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       Value *result_name_arg =
           createGlobalStringPtrIfNotExist(I->getName(), Builder);
 
-      SmallVector<Value *, 7> all_arg;
-      // Builder.getContext().
-      // ArrayRef<Value*> all_arg;
+      SmallVector<Value *, 8> all_arg;
+      all_arg.push_back(create_map_inst);
       all_arg.push_back(I->getOperand(0));
       all_arg.push_back(I->getOperand(1));
       all_arg.push_back(Builder.getInt32(func_id));
@@ -490,7 +495,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
     }
   }
 
-  void relaceFloatOPName(Module &M, BasicBlock &B, Function &F, int32_t func_id){
+  void relaceFloatOPName(Module &M, BasicBlock &B, Function &F,
+                         int32_t func_id) {
     for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
       Instruction &I = *ii;
 
@@ -516,12 +522,14 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
     }
   }
 
-  bool runOnBasicBlock(Module &M, BasicBlock &B, Function &F, int32_t func_id) {
+  bool runOnBasicBlock(Module &M, BasicBlock &B, Function &F, int32_t func_id,
+                       Instruction *create_map_inst) {
     bool modified = false;
 
     LLVMContext &Context = M.getContext();
     IRBuilder<> Builder(Context);
-    SmallVector<Type *, 5> arg_func_signalture;
+    SmallVector<Type *, 7> arg_func_signalture;
+    arg_func_signalture.push_back(Builder.getInt8PtrTy());
     arg_func_signalture.push_back(Builder.getInt8PtrTy());
     arg_func_signalture.push_back(Builder.getInt8PtrTy());
     arg_func_signalture.push_back(Builder.getInt32Ty());
@@ -543,8 +551,19 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
         "__doubleArrayElementStoreToDouble",
         FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
 
+    Constant *hookClearMap;
+    hookClearMap = M.getOrInsertFunction(
+        "deleteFunctionFloatErrorInfo",
+        FunctionType::get(Builder.getVoidTy(), Builder.getInt8PtrTy(), false));
+
     for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
       Instruction &I = *ii;
+
+      if (I.getOpcode() == Instruction::Ret) {
+        Builder.SetInsertPoint(&I);
+        CREATE_CALL(hookClearMap, create_map_inst);
+        continue;
+      }
 
       Fops opCode = mustReplace(I);
       if (opCode == FOP_IGNORE && I.getOpcode() != Instruction::Load &&
@@ -622,9 +641,11 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
               Value *value_double_array_name =
                   createGlobalStringPtrIfNotExist(double_array_name, Builder);
 
-              SmallVector<Value *, 6> all_arg;
+              SmallVector<Value *, 7> all_arg;
               Value *value_from_name_arg = createGlobalStringPtrIfNotExist(
                   store_inst->getOperand(0)->getName(), Builder);
+
+              all_arg.push_back(create_map_inst);
               all_arg.push_back(value_from_name_arg);
               all_arg.push_back(value_double_array_name);
               all_arg.push_back(Builder.getInt32(func_id));
@@ -659,9 +680,10 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
               Value *value_double_array_name =
                   createGlobalStringPtrIfNotExist(double_array_name, Builder);
 
-              SmallVector<Value *, 6> all_arg;
+              SmallVector<Value *, 7> all_arg;
               Value *value_to_name_arg = createGlobalStringPtrIfNotExist(
                   load_inst->getName(), Builder);
+              all_arg.push_back(create_map_inst);
               all_arg.push_back(value_double_array_name);
               all_arg.push_back(value_to_name_arg);
               all_arg.push_back(Builder.getInt32(func_id));
@@ -691,10 +713,20 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
           Value *value_to_name_arg =
               createGlobalStringPtrIfNotExist(I.getName(), Builder);
 
-          Builder.CreateCall5(hookStoreFunc, value_from_name_arg,
+          SmallVector<Value *, 6> arg_store_double;
+          arg_store_double.push_back(create_map_inst);
+          arg_store_double.push_back(value_from_name_arg);
+          arg_store_double.push_back(value_to_name_arg);
+          arg_store_double.push_back(Builder.getInt32(func_id));
+          arg_store_double.push_back(Builder.getInt32(loc.getLine()));
+          arg_store_double.push_back(&I);
+
+          /* Builder.CreateCall5(hookStoreFunc, value_from_name_arg,
                               value_to_name_arg, Builder.getInt32(func_id),
                               Builder.getInt32(I.getDebugLoc().getLine()), &I,
-                              "");
+                              ""); */
+          Builder.CreateCall(hookStoreFunc,
+                             makeArrayRef<Value *>(arg_store_double));
           ii++;
         }
         continue;
@@ -719,13 +751,6 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
             LLVMContext &Context = M.getContext();
             IRBuilder<> Builder(Context);
-            SmallVector<Type *, 5> arg_store_double;
-            arg_store_double.push_back(Builder.getInt8PtrTy());
-            arg_store_double.push_back(Builder.getInt8PtrTy());
-            arg_store_double.push_back(Builder.getInt32Ty());
-            arg_store_double.push_back(Builder.getInt32Ty());
-            arg_store_double.push_back(Builder.getDoubleTy());
-
             Builder.SetInsertPoint(I.getNextNode());
 
             Value *value_arg1 = I.getOperand(0);
@@ -761,11 +786,16 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
                 I.getOperand(1)->getName(), Builder);
             // Value *value_arg1 = createGlobalStringPtrIfNotExist(
             //    I.getOperand(1)->getName(), Builder);
+            SmallVector<Value *, 6> arg_store_double;
+            arg_store_double.push_back(create_map_inst);
+            arg_store_double.push_back(value_name_arg1);
+            arg_store_double.push_back(value_name_arg2);
+            arg_store_double.push_back(Builder.getInt32(func_id));
+            arg_store_double.push_back(Builder.getInt32(loc.getLine()));
+            arg_store_double.push_back(I.getOperand(0));
 
-            Builder.CreateCall5(hookStoreFunc, value_name_arg1, value_name_arg2,
-                                Builder.getInt32(func_id),
-                                Builder.getInt32(loc.getLine()),
-                                I.getOperand(0), "");
+            Builder.CreateCall(hookStoreFunc,
+                               makeArrayRef<Value *>(arg_store_double));
           }
         }
         continue;
@@ -797,7 +827,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
                 Value *value_to_name_arg = createGlobalStringPtrIfNotExist(
                     load_inst->getName(), Builder);
 
-                SmallVector<Value *, 6> all_arg;
+                SmallVector<Value *, 7> all_arg;
+                all_arg.push_back(create_map_inst);
                 all_arg.push_back(value_double_array_name);
                 all_arg.push_back(value_to_name_arg);
                 all_arg.push_back(Builder.getInt32(func_id));
@@ -822,7 +853,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
                 Value *value_from_name_arg = createGlobalStringPtrIfNotExist(
                     store_inst->getOperand(0)->getName(), Builder);
 
-                SmallVector<Value *, 6> all_arg;
+                SmallVector<Value *, 7> all_arg;
+                all_arg.push_back(create_map_inst);
                 all_arg.push_back(value_from_name_arg);
                 all_arg.push_back(value_double_array_name);
                 all_arg.push_back(Builder.getInt32(func_id));
@@ -859,8 +891,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
           break;
       } */
 
-      Instruction *newInst =
-          replaceWithMCACall(M, B, &I, opCode, func_id, loc.getLine());
+      Instruction *newInst = replaceWithMCACall(M, B, &I, opCode, func_id,
+                                                loc.getLine(), create_map_inst);
 
       if (newInst == NULL) continue;
       // Remove instruction from parent so it can be
@@ -869,11 +901,11 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       if (newInst->getParent() != NULL) newInst->removeFromParent();
       newInst->takeName(&I);
       ReplaceInstWithInst(B.getInstList(), ii, newInst);
-      //I.replaceAllUsesWith(newInst);
-      //I.eraseFromParent();
+      // I.replaceAllUsesWith(newInst);
+      // I.eraseFromParent();
 
-      //if (newInst->getParent() != NULL) newInst->removeFromParent();
-      //ReplaceInstWithInst(B.getInstList(), ii, newInst);
+      // if (newInst->getParent() != NULL) newInst->removeFromParent();
+      // ReplaceInstWithInst(B.getInstList(), ii, newInst);
 
       modified = true;
     }

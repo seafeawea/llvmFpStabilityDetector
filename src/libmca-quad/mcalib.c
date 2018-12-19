@@ -322,42 +322,42 @@ static inline double _mca_dbin(double a, double b, const int qop) {
 * point operators
 **********************************************************************/
 
-static float _floatadd(float a, float b, int32_t func_id, int32_t line) {
+static float _floatadd(char* ptr_fp_node_map, float a, float b, int32_t func_id, int32_t line) {
 	return _mca_sbin(a, b, MCA_ADD);
 }
 
-static float _floatsub(float a, float b, int32_t func_id, int32_t line) {
+static float _floatsub(char* ptr_fp_node_map, float a, float b, int32_t func_id, int32_t line) {
 	//return a - b
 	return _mca_sbin(a, b, MCA_SUB);
 }
 
-static float _floatmul(float a, float b, int32_t func_id, int32_t line) {
+static float _floatmul(char* ptr_fp_node_map, float a, float b, int32_t func_id, int32_t line) {
 	//return a * b
 	return _mca_sbin(a, b, MCA_MUL);
 }
 
-static float _floatdiv(float a, float b, int32_t func_id, int32_t line) {
+static float _floatdiv(char* ptr_fp_node_map, float a, float b, int32_t func_id, int32_t line) {
 	//return a / b
 	return _mca_sbin(a, b, MCA_DIV);
 }
 
 
-static double _doubleadd(double a, double b, int32_t func_id, int32_t line) {
+static double _doubleadd(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line) {
 	double tmp=_mca_dbin(a,b,MCA_ADD);  
 	return tmp;
 }
 
-static double _doublesub(double a, double b, int32_t func_id, int32_t line) {
+static double _doublesub(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line) {
 	//return a - b
 	return _mca_dbin(a, b, MCA_SUB);
 }
 
-static double _doublemul(double a, double b, int32_t func_id, int32_t line) {
+static double _doublemul(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line) {
 	//return a * b
 	return _mca_dbin(a, b, MCA_MUL);
 }
 
-static double _doublediv(double a, double b, int32_t func_id, int32_t line) {
+static double _doublediv(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line) {
 	//return a / b
 	return _mca_dbin(a, b, MCA_DIV);
 }

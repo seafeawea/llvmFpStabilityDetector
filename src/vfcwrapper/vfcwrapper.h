@@ -44,15 +44,15 @@ int vfc_set_precision_and_mode(unsigned int precision, int mode);
 
 /* MCA backend interface */
 struct mca_interface_t {
-    float (*floatadd)(float, float,  int32_t,  int32_t, char*, char*, char*);
-    float (*floatsub)(float, float,  int32_t,  int32_t, char*, char*, char*);
-    float (*floatmul)(float, float,  int32_t,  int32_t, char*, char*, char*);
-    float (*floatdiv)(float, float,  int32_t,  int32_t, char*, char*, char*);
+    float (*floatadd)(char*, float, float,  int32_t,  int32_t, char*, char*, char*);
+    float (*floatsub)(char*, float, float,  int32_t,  int32_t, char*, char*, char*);
+    float (*floatmul)(char*, float, float,  int32_t,  int32_t, char*, char*, char*);
+    float (*floatdiv)(char*, float, float,  int32_t,  int32_t, char*, char*, char*);
 
-    double (*doubleadd)(double, double,  int32_t,  int32_t, char*, char*, char*);
-    double (*doublesub)(double, double,  int32_t,  int32_t, char*, char*, char*);
-    double (*doublemul)(double, double,  int32_t,  int32_t, char*, char*, char*);
-    double (*doublediv)(double, double,  int32_t,  int32_t, char*, char*, char*);
+    double (*doubleadd)(char*, double, double,  int32_t,  int32_t, char*, char*, char*);
+    double (*doublesub)(char*, double, double,  int32_t,  int32_t, char*, char*, char*);
+    double (*doublemul)(char*, double, double,  int32_t,  int32_t, char*, char*, char*);
+    double (*doublediv)(char*, double, double,  int32_t,  int32_t, char*, char*, char*);
 
     void (*seed)(void);
     int (*set_mca_mode)(int);

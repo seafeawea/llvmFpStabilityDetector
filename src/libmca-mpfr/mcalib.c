@@ -239,7 +239,7 @@ static double _mca_dunr(double a, mpfr_unr mpfr_op) {
 * point operators
 **********************************************************************/
 
-static float _floatadd(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+static float _floatadd(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	//return a + b
 	float c = a + b;
 	if (fabs(c)/(fabs(a-b)) < 1.0e-5) {
@@ -249,7 +249,7 @@ static float _floatadd(double a, double b, int32_t func_id, int32_t line, char* 
 	//return _mca_sbin(a, b,(mpfr_bin)MP_ADD);
 }
 
-static float _floatsub(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+static float _floatsub(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	//return a - b
 	float c = a - b;
 	if (fabs(c)/(fabs(a+b)) < 1.0e-5 ) {
@@ -259,18 +259,18 @@ static float _floatsub(double a, double b, int32_t func_id, int32_t line, char* 
 	//return _mca_sbin(a, b, (mpfr_bin)MP_SUB);
 }
 
-static float _floatmul(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+static float _floatmul(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	return a * b;
 	//return _mca_sbin(a, b, (mpfr_bin)MP_MUL);
 }
 
-static float _floatdiv(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+static float _floatdiv(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	return a / b;
 	//return _mca_sbin(a, b, (mpfr_bin)MP_DIV);
 }
 
 //static float _doubleadd(float a, float b, int32_t func_id, int32_t line) {
-static double _doubleadd(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+static double _doubleadd(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	//int32_t func_id = magic_id >> 24;
 	//int32_t line = (magic_id << 8) >> 8;
 	//printf("in func %d, line %d\n", func_id, line);
@@ -279,7 +279,7 @@ static double _doubleadd(double a, double b, int32_t func_id, int32_t line, char
 
 	//printf("doubleadd %s = %s + %s\n", result_name, a_name, b_name);
 
-	return _fp_debug_doubleadd(a, b, func_id, line, a_name, b_name, result_name);
+	return _fp_debug_doubleadd(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 	
 	/*
 	double c = a + b;
@@ -293,7 +293,7 @@ static double _doubleadd(double a, double b, int32_t func_id, int32_t line, char
 	//return _mca_dbin(a, b, (mpfr_bin)MP_ADD);
 }
 
-static double _doublesub(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+static double _doublesub(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	/*
 	double c = a - b;
 	double d = _mca_dbin(a, b, (mpfr_bin)MP_SUB);
@@ -305,7 +305,7 @@ static double _doublesub(double a, double b, int32_t func_id, int32_t line, char
 
 	//printf("doublesub %s = %s - %s\n", result_name, a_name, b_name);
 
-    return _fp_debug_doublesub(a, b, func_id, line, a_name, b_name, result_name);
+    return _fp_debug_doublesub(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 	//double c = a - b;
 	//if (fabs(c)/(fabs(a+b)) < 1.0e-7 ) {
 	//	addErrorCount(func_id, line);
@@ -315,15 +315,15 @@ static double _doublesub(double a, double b, int32_t func_id, int32_t line, char
 	//return _mca_dbin(a, b, (mpfr_bin)MP_SUB);
 }
 
-static double _doublemul(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	return _fp_debug_doublemul(a, b, func_id, line, a_name, b_name, result_name);
+static double _doublemul(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+	return _fp_debug_doublemul(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 	
 	//return a * b;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_MUL);
 }
 
-static double _doublediv(double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	return _fp_debug_doublediv(a, b, func_id, line, a_name, b_name, result_name);
+static double _doublediv(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
+	return _fp_debug_doublediv(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 	
 	//return a / b;
 	//return _mca_dbin(a, b, (mpfr_bin)MP_DIV);
