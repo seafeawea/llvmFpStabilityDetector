@@ -8,9 +8,7 @@ extern "C" {
 #endif
 
 void initNewFunction(const char* name, const int32_t func_id);
-void addErrorCount(const int32_t func_id, const int32_t line);
-void printFuncErrorInfo(const int32_t func_id);
-void clearDoubleNodeMap(int32_t func_id);
+void checkAndPrintInfo(int32_t func_id);
 void* createFpNodeMap();
 void deleteFunctionFloatErrorInfo(void* ptr_fp_node_map);
 double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,

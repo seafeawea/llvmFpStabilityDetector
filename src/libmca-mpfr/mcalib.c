@@ -242,9 +242,6 @@ static double _mca_dunr(double a, mpfr_unr mpfr_op) {
 static float _floatadd(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	//return a + b
 	float c = a + b;
-	if (fabs(c)/(fabs(a-b)) < 1.0e-5) {
-		addErrorCount(func_id, line);
-	}
 	return c;
 	//return _mca_sbin(a, b,(mpfr_bin)MP_ADD);
 }
@@ -252,9 +249,6 @@ static float _floatadd(char* ptr_fp_node_map, double a, double b, int32_t func_i
 static float _floatsub(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	//return a - b
 	float c = a - b;
-	if (fabs(c)/(fabs(a+b)) < 1.0e-5 ) {
-		addErrorCount(func_id, line);
-	}
 	return c;
 	//return _mca_sbin(a, b, (mpfr_bin)MP_SUB);
 }

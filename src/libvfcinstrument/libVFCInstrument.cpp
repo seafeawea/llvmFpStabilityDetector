@@ -242,7 +242,7 @@ struct VfclibInst : public ModulePass {
     SmallVector<Type *, 1> arg_vector;
     arg_vector.push_back(Builder.getInt32Ty());
     Constant *hookFunc = M.getOrInsertFunction(
-        "clearDoubleNodeMap",
+        "checkAndPrintInfo",
         FunctionType::get(Builder.getVoidTy(), arg_vector, false));
     CREATE_CALL(hookFunc, Builder.getInt32(func_id));
 
@@ -562,6 +562,15 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       if (I.getOpcode() == Instruction::Ret) {
         Builder.SetInsertPoint(&I);
         CREATE_CALL(hookClearMap, create_map_inst);
+        continue;
+      }
+
+      if (I.getOpcode() == Instruction::FPTrunc) {
+        errs() << "Find a fptrunc inst\n"; 
+        continue;
+      }
+      if (I.getOpcode() == Instruction::FPExt) {
+        errs() << "Find a fpext inst\n"; 
         continue;
       }
 
