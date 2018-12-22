@@ -11,6 +11,7 @@ void initNewFunction(const char* name, const int32_t func_id);
 void checkAndPrintInfo(int32_t func_id);
 void* createFpNodeMap();
 void deleteFunctionFloatErrorInfo(void* ptr_fp_node_map);
+
 double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,
                            int32_t func_id, int32_t line, char* a_name,
                            char* b_name, char* result_name);
@@ -23,6 +24,19 @@ double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
 double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
                            int32_t func_id, int32_t line, char* a_name,
                            char* b_name, char* result_name);
+
+float _fp_debug_floatadd(void* ptr_fp_node_map, float a, float b,
+                         int32_t func_id, int32_t line, char* a_name,
+                         char* b_name, char* result_name);
+float _fp_debug_floatsub(void* ptr_fp_node_map, float a, float b,
+                         int32_t func_id, int32_t line, char* a_name,
+                         char* b_name, char* result_name);
+float _fp_debug_floatmul(void* ptr_fp_node_map, float a, float b,
+                         int32_t func_id, int32_t line, char* a_name,
+                         char* b_name, char* result_name);
+float _fp_debug_floatdiv(void* ptr_fp_node_map, float a, float b,
+                         int32_t func_id, int32_t line, char* a_name,
+                         char* b_name, char* result_name);
 
 #if defined(__cplusplus)
 }
