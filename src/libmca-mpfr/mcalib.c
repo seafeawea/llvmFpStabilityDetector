@@ -240,87 +240,35 @@ static double _mca_dunr(double a, mpfr_unr mpfr_op) {
 **********************************************************************/
 
 static float _floatadd(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	//return a + b
-	float c = a + b;
-	return c;
-	//return _mca_sbin(a, b,(mpfr_bin)MP_ADD);
+	return _fp_debug_floatadd(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 }
 
 static float _floatsub(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	//return a - b
-	float c = a - b;
-	return c;
-	//return _mca_sbin(a, b, (mpfr_bin)MP_SUB);
+	return _fp_debug_floatsub(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 }
 
 static float _floatmul(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	return a * b;
-	//return _mca_sbin(a, b, (mpfr_bin)MP_MUL);
+	return _fp_debug_floatmul(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 }
 
 static float _floatdiv(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	return a / b;
-	//return _mca_sbin(a, b, (mpfr_bin)MP_DIV);
+	return _fp_debug_floatdiv(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
 }
 
-//static float _doubleadd(float a, float b, int32_t func_id, int32_t line) {
 static double _doubleadd(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	//int32_t func_id = magic_id >> 24;
-	//int32_t line = (magic_id << 8) >> 8;
-	//printf("in func %d, line %d\n", func_id, line);
-
-	// for datafloat analysis
-
-	//printf("doubleadd %s = %s + %s\n", result_name, a_name, b_name);
-
 	return _fp_debug_doubleadd(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
-	
-	/*
-	double c = a + b;
-	double d = _mca_dbin(a, b, (mpfr_bin)MP_ADD);
-	if (fabs(c)/(fabs(a-b)) < 1.0e-10 && fabs(d)/(fabs(a-b)) < 1.0e-10) {
-		printf("Cancellation detected in %s, with input %lf + %lf\n", dbg, a, b);
-	}
-	return d;
-	*/
-
-	//return _mca_dbin(a, b, (mpfr_bin)MP_ADD);
 }
 
 static double _doublesub(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
-	/*
-	double c = a - b;
-	double d = _mca_dbin(a, b, (mpfr_bin)MP_SUB);
-	if (fabs(c)/(fabs(a+b)) < 1.0e-10 && fabs(d)/(fabs(a+b)) < 1.0e-10) {
-		printf("Cancellation detected in %s, with input %lf - %lf\n", dbg, a, b);
-	}
-	return d;
-	*/
-
-	//printf("doublesub %s = %s - %s\n", result_name, a_name, b_name);
-
     return _fp_debug_doublesub(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
-	//double c = a - b;
-	//if (fabs(c)/(fabs(a+b)) < 1.0e-7 ) {
-	//	addErrorCount(func_id, line);
-		//printf("Cancellation detected in %s, with input %lf - %lf\n", dbg, a, b);
-	//}
-	//return c;
-	//return _mca_dbin(a, b, (mpfr_bin)MP_SUB);
 }
 
 static double _doublemul(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	return _fp_debug_doublemul(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
-	
-	//return a * b;
-	//return _mca_dbin(a, b, (mpfr_bin)MP_MUL);
 }
 
 static double _doublediv(char* ptr_fp_node_map, double a, double b, int32_t func_id, int32_t line, char* a_name, char* b_name, char* result_name) {
 	return _fp_debug_doublediv(ptr_fp_node_map, a, b, func_id, line, a_name, b_name, result_name);
-	
-	//return a / b;
-	//return _mca_dbin(a, b, (mpfr_bin)MP_DIV);
 }
 
 

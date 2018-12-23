@@ -250,7 +250,7 @@ struct VfclibInst : public ModulePass {
         "createFpNodeMap", FunctionType::get(Builder.getInt8PtrTy(), false)));
 
     for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
-      relaceFloatOPName(M, *bi, F, func_id);
+      replaceFloatOPName(M, *bi, F, func_id);
     }
 
     for (Function::iterator bi = F.begin(), be = F.end(); bi != be; ++bi) {
@@ -402,11 +402,22 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       // Use &use_arg1 = I->getOperandUse(0);
       // StringRef name_arg1 = getFloatArgName(use_arg1);
       Value *value_arg1 = I->getOperand(0);
-      StringRef name_arg1 = value_arg1->getName();
+      StringRef name_arg1;
+      if (value_arg1->getValueID() == Value::ConstantFPVal) {
+        name_arg1 = StringRef("__const__value__");
+      } else {
+        name_arg1 = value_arg1->getName();
+      }
+      // StringRef name_arg1 = value_arg1->getName();
       // Use &use_arg2 = I->getOperandUse(1);
       // StringRef name_arg2 = getFloatArgName(use_arg2);
       Value *value_arg2 = I->getOperand(1);
-      StringRef name_arg2 = value_arg2->getName();
+      StringRef name_arg2;
+      if (value_arg2->getValueID() == Value::ConstantFPVal) {
+        name_arg2 = StringRef("__const__value__");
+      } else {
+        name_arg2 = value_arg2->getName();
+      }
 
       Value *value_name_arg1 =
           createGlobalStringPtrIfNotExist(name_arg1, Builder);
@@ -495,8 +506,8 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
     }
   }
 
-  void relaceFloatOPName(Module &M, BasicBlock &B, Function &F,
-                         int32_t func_id) {
+  void replaceFloatOPName(Module &M, BasicBlock &B, Function &F,
+                          int32_t func_id) {
     for (BasicBlock::iterator ii = B.begin(), ie = B.end(); ii != ie; ++ii) {
       Instruction &I = *ii;
 
@@ -528,28 +539,42 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
     LLVMContext &Context = M.getContext();
     IRBuilder<> Builder(Context);
-    SmallVector<Type *, 7> arg_func_signalture;
-    arg_func_signalture.push_back(Builder.getInt8PtrTy());
-    arg_func_signalture.push_back(Builder.getInt8PtrTy());
-    arg_func_signalture.push_back(Builder.getInt8PtrTy());
-    arg_func_signalture.push_back(Builder.getInt32Ty());
-    arg_func_signalture.push_back(Builder.getInt32Ty());
-    arg_func_signalture.push_back(Builder.getDoubleTy());
-    Constant *hookStoreFunc;
-    hookStoreFunc = M.getOrInsertFunction(
+    SmallVector<Type *, 6> arg_func;
+    arg_func.push_back(Builder.getInt8PtrTy());
+    arg_func.push_back(Builder.getInt8PtrTy());
+    arg_func.push_back(Builder.getInt8PtrTy());
+    arg_func.push_back(Builder.getInt32Ty());
+    arg_func.push_back(Builder.getInt32Ty());
+    arg_func.push_back(Builder.getDoubleTy());
+    Constant *hookStoreDoubleFunc = M.getOrInsertFunction(
         "__storeDouble",
-        FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
+        FunctionType::get(Builder.getVoidTy(), arg_func, false));
 
-    arg_func_signalture.push_back(Builder.getInt64Ty());
+    Constant *hookDoubleToFloatFunc = M.getOrInsertFunction(
+        "__doubleToFloat",
+        FunctionType::get(Builder.getVoidTy(), arg_func, false));
+
+    arg_func.push_back(Builder.getInt64Ty());
     Constant *hookDoubleStoreToDoubleArray;
     hookDoubleStoreToDoubleArray = M.getOrInsertFunction(
         "__doubleStoreToDoubleArrayElement",
-        FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
+        FunctionType::get(Builder.getVoidTy(), arg_func, false));
 
     Constant *hookDoubleArrayStoreToDouble;
     hookDoubleArrayStoreToDouble = M.getOrInsertFunction(
         "__doubleArrayElementStoreToDouble",
-        FunctionType::get(Builder.getVoidTy(), arg_func_signalture, false));
+        FunctionType::get(Builder.getVoidTy(), arg_func, false));
+
+    arg_func.pop_back();
+    arg_func.pop_back();
+    arg_func.push_back(Builder.getFloatTy());
+    Constant *hookStoreFloatFunc = M.getOrInsertFunction(
+        "__storeFloat",
+        FunctionType::get(Builder.getVoidTy(), arg_func, false));
+
+    Constant *hookFloatToDoubleFunc = M.getOrInsertFunction(
+        "__floatToDouble",
+        FunctionType::get(Builder.getVoidTy(), arg_func, false));
 
     Constant *hookClearMap;
     hookClearMap = M.getOrInsertFunction(
@@ -566,11 +591,71 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
       }
 
       if (I.getOpcode() == Instruction::FPTrunc) {
-        errs() << "Find a fptrunc inst\n"; 
+        errs() << "Find a fptrunc inst\n";
+        FPTruncInst *FTI = cast<FPTruncInst>(&I);
+        if (FTI->getOperand(0)->getType()->isDoubleTy() &&
+            FTI->getDestTy()->isFloatTy()) {
+          Builder.SetInsertPoint(I.getNextNode());
+
+          Value *value_arg1 = I.getOperand(0);
+          StringRef name_arg1;
+          if (value_arg1->getValueID() == Value::ConstantFPVal) {
+            name_arg1 = StringRef("__const__value__");
+          } else {
+            name_arg1 = I.getOperand(0)->getName();
+          }
+
+          Value *value_from_name_arg =
+              createGlobalStringPtrIfNotExist(name_arg1, Builder);
+          Value *value_to_name_arg =
+              createGlobalStringPtrIfNotExist(I.getName(), Builder);
+
+          SmallVector<Value *, 6> arg_double_to_float;
+          arg_double_to_float.push_back(create_map_inst);
+          arg_double_to_float.push_back(value_from_name_arg);
+          arg_double_to_float.push_back(value_to_name_arg);
+          arg_double_to_float.push_back(Builder.getInt32(func_id));
+          arg_double_to_float.push_back(
+              Builder.getInt32(I.getDebugLoc().getLine()));
+          arg_double_to_float.push_back(I.getOperand(0));
+
+          Builder.CreateCall(hookDoubleToFloatFunc,
+                             makeArrayRef<Value *>(arg_double_to_float));
+        }
         continue;
       }
       if (I.getOpcode() == Instruction::FPExt) {
-        errs() << "Find a fpext inst\n"; 
+        errs() << "Find a fpext inst\n";
+        FPExtInst *FEI = cast<FPExtInst>(&I);
+
+        if (FEI->getOperand(0)->getType()->isFloatTy() &&
+            FEI->getDestTy()->isDoubleTy()) {
+          Builder.SetInsertPoint(I.getNextNode());
+
+          Value *value_arg1 = I.getOperand(0);
+          StringRef name_arg1;
+          if (value_arg1->getValueID() == Value::ConstantFPVal) {
+            name_arg1 = StringRef("__const__value__");
+          } else {
+            name_arg1 = I.getOperand(0)->getName();
+          }
+
+          Value *value_from_name_arg =
+              createGlobalStringPtrIfNotExist(name_arg1, Builder);
+          Value *value_to_name_arg =
+              createGlobalStringPtrIfNotExist(I.getName(), Builder);
+
+          SmallVector<Value *, 6> arg_float_to_double;
+          arg_float_to_double.push_back(create_map_inst);
+          arg_float_to_double.push_back(value_from_name_arg);
+          arg_float_to_double.push_back(value_to_name_arg);
+          arg_float_to_double.push_back(Builder.getInt32(func_id));
+          arg_float_to_double.push_back(
+              Builder.getInt32(I.getDebugLoc().getLine()));
+          arg_float_to_double.push_back(I.getOperand(0));
+          Builder.CreateCall(hookFloatToDoubleFunc,
+                             makeArrayRef<Value *>(arg_float_to_double));
+        }
         continue;
       }
 
@@ -580,30 +665,12 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
           I.getOpcode() != Instruction::BitCast) {
         continue;
       }
-      /*
-            errs() << "----------------------------" << '\n';
-            errs() << "I.opCode " << I.getOpcodeName();
-            errs() << '\n';
-            for (Instruction::op_iterator it = I.op_begin(); it != I.op_end();
-         it++) { errs() << "op "; it->get()->print(errs()); errs() << '\n';
-            }
-            errs() << "----------------------------" << '\n';
-      */
+
       std::string dbgInfo;
       llvm::raw_string_ostream rso(dbgInfo);
       DebugLoc loc = I.getDebugLoc();  //.print(rso)
 
       if (I.getOpcode() == Instruction::Load) {
-        // Type *opType = I.getOperand(0)->getType();
-        /* if (opType->isPointerTy() &&
-            opType->getPointerElementType()->isDoubleTy()) {
-          MDNode *N = MDNode::get(
-              M.getContext(),
-              MDString::get(M.getContext(), I.getOperand(0)->getName()));
-          I.setMetadata("fp", N);
-          continue;
-        } */
-
         // %.reload30 = load [2 x double]** %.reg2mem26
         // %50 = bitcast [2 x double]* %.reload30 to double*, !dbg !64
         // %51 = getelementptr double* %50, i64 0, !dbg !64
@@ -663,11 +730,10 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
               all_arg.push_back(store_inst->getOperand(0));
               all_arg.push_back(array_index);
 
-              // Instruction *newInst =
               Builder.CreateCall(hookDoubleStoreToDoubleArray,
                                  makeArrayRef<Value *>(all_arg));
               int forward_step = 4;
-              while (forward_step--) ii++;
+              while (forward_step--) ++ii;
 
               //%tmp94 = load double* %tmp92
             } else if (isa<LoadInst>(
@@ -701,11 +767,10 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
               all_arg.push_back(load_inst);
               all_arg.push_back(array_index);
 
-              // Instruction *newInst =
               Builder.CreateCall(hookDoubleArrayStoreToDouble,
                                  makeArrayRef<Value *>(all_arg));
               int forward_step = 4;
-              while (forward_step--) ii++;
+              while (forward_step--) ++ii;
             }
           }
 
@@ -730,13 +795,9 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
           arg_store_double.push_back(Builder.getInt32(loc.getLine()));
           arg_store_double.push_back(&I);
 
-          /* Builder.CreateCall5(hookStoreFunc, value_from_name_arg,
-                              value_to_name_arg, Builder.getInt32(func_id),
-                              Builder.getInt32(I.getDebugLoc().getLine()), &I,
-                              ""); */
-          Builder.CreateCall(hookStoreFunc,
+          Builder.CreateCall(hookStoreDoubleFunc,
                              makeArrayRef<Value *>(arg_store_double));
-          ii++;
+          ++ii;
         }
         continue;
 
@@ -744,7 +805,6 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
         if (I.getNumOperands() == 2) {
           Type *opType1 = I.getOperand(0)->getType();
           Type *opType2 = I.getOperand(1)->getType();
-          // errs() << "I.name " << I.getName() << '\n';
           if (opType1->isDoubleTy() && opType2->isPointerTy() &&
               opType2->getPointerElementType()->isDoubleTy()) {
             // if (I.getName())
@@ -764,25 +824,6 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
 
             Value *value_arg1 = I.getOperand(0);
             StringRef name_arg1;
-            /* if (isa<Instruction>(use_arg1)) {
-              Instruction *I_arg = cast<Instruction>(use_arg1);
-              switch (I_arg->getOpcode()) {
-                case Instruction::Load:
-                  if (I_arg->getMetadata("fp") != NULL) {
-                    name_arg1 =
-                        cast<MDString>(I_arg->getMetadata("fp")->getOperand(0))
-                            ->getString();
-                  } else {
-                    assert(0 && "Load Instrution don't have fp info");
-                  }
-                  break;
-
-                default:
-                  name_arg1 = I.getOperand(0)->getName();
-                  break;
-              }
-            } else if (cast<Value>(use_arg1)->getValueID() ==
-                       Value::ConstantFPVal) { */
             if (value_arg1->getValueID() == Value::ConstantFPVal) {
               name_arg1 = StringRef("__const__value__");
             } else {
@@ -803,13 +844,12 @@ Instruction *newInst = CREATE_CALL5(hookFunc,
             arg_store_double.push_back(Builder.getInt32(loc.getLine()));
             arg_store_double.push_back(I.getOperand(0));
 
-            Builder.CreateCall(hookStoreFunc,
+            Builder.CreateCall(hookStoreDoubleFunc,
                                makeArrayRef<Value *>(arg_store_double));
           }
         }
         continue;
 
-        // %tmp120 = bitcast [3 x double]* %b to double*
       } else if (I.getOpcode() == Instruction::BitCast) {
         if (I.getType()->isPointerTy() &&
             I.getType()->getPointerElementType()->isDoubleTy() &&
