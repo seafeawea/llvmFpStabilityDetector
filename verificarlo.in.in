@@ -147,10 +147,7 @@ def compiler_mode(sources, options, output, args):
                 options=options,
                 dragonegg=dragonegg,
                 ir=ir))
-            shell('{opt} -S -reg2mem {ir} -o {ir}'.format(
-                opt=opt,
-                ir=ir,
-                ins=ins))
+            
         else:
             shell('{clang} -c -S {source} -emit-llvm {options} -o {ir}'.format(
                 clang=clang,
@@ -158,6 +155,11 @@ def compiler_mode(sources, options, output, args):
                 options=options,
                 ir=ir
             ))
+        
+        shell('{opt} -S -reg2mem -instnamer {ir} -o {ir}'.format(
+                opt=opt,
+                ir=ir,
+                ins=ins))
 
         selectfunction = ""
         if args.function:
