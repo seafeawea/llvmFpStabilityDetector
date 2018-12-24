@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 using namespace std;
 
@@ -27,7 +28,7 @@ class FpNode {
 
  private:
   FpType fpTypeID;
-  static map<string, FpNode> const_node_map;
+  static unordered_map<string, FpNode> const_node_map;
 
  public:
   FpType getType() { return fpTypeID; }
@@ -35,17 +36,17 @@ class FpNode {
   bool isDoubleTy() { return fpTypeID == kDouble; }
   bool isValid() { return fpTypeID != kUnknown; }
 
+  int32_t line;
+  int32_t valid_bits;
+
   double d_value;
   float f_value;
   mpfr_t shadow_value;
   int32_t depth;
-  int32_t valid_bits;
   int32_t bits_canceled_by_this_instruction;
   int32_t cancelled_badness_bits;
   int32_t max_cancelled_badness_bits;
-  int32_t line;
   double sum_relative_error;
-  // double cur_relative_error;
   double real_error_to_shadow;
   double relative_error_to_shadow;
 

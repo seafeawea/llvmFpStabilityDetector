@@ -4,7 +4,7 @@ libtinymt64_la_SOURCES = \
 	tinymt64.c \
 	tinymt64.h 
 
-libstlwraper_la_CXXFLAGS = -fPIC -static
+libstlwraper_la_CXXFLAGS = -fPIC -static -std=c++11
 libstlwraper_la_SOURCES = \
 	stlwraper.cpp \
 	stlwraper.h \

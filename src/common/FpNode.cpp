@@ -8,9 +8,9 @@ mpfr_prec_t PREC = 120;
 FpNode* FpNode::createConstantDouble(double val) {
   string value_str(ConvertToString(val));
   FpNode* node;
-  map<string, FpNode>::iterator it = const_node_map.find(value_str);
+  unordered_map<string, FpNode>::iterator it = const_node_map.find(value_str);
   if (it == FpNode::const_node_map.end()) {
-    pair<map<string, FpNode>::iterator, bool> ret;
+    pair<unordered_map<string, FpNode>::iterator, bool> ret;
     ret = FpNode::const_node_map.insert(
         pair<string, FpNode>(value_str, FpNode(kDouble)));
     node = &(ret.first->second);
@@ -28,9 +28,9 @@ FpNode* FpNode::createConstantDouble(double val) {
 FpNode* FpNode::createConstantFloat(float val) {
   string value_str(ConvertToString(val));
   FpNode* node;
-  map<string, FpNode>::iterator it = const_node_map.find(value_str);
+  unordered_map<string, FpNode>::iterator it = const_node_map.find(value_str);
   if (it == const_node_map.end()) {
-    pair<map<string, FpNode>::iterator, bool> ret;
+    pair<unordered_map<string, FpNode>::iterator, bool> ret;
     ret = FpNode::const_node_map.insert(
         pair<string, FpNode>(value_str, FpNode(kFloat)));
     node = &(ret.first->second);
