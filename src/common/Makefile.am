@@ -7,5 +7,7 @@ libtinymt64_la_SOURCES = \
 libstlwraper_la_CXXFLAGS = -fPIC -static
 libstlwraper_la_SOURCES = \
 	stlwraper.cpp \
-	stlwraper.h
+	stlwraper.h \
+	FpNode.cpp \
+	FpNode,h
 	
