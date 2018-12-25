@@ -12,15 +12,6 @@ using namespace std;
 
 class FloatInstructionInfo;
 
-
-
-template <typename T>
-inline string ConvertToString(T value) {
-  stringstream ss;
-  ss << value;
-  return ss.str();
-}
-
 class FpNode {
  public:
   enum FpType { kUnknown = 0, kFloat, kDouble };
@@ -28,7 +19,8 @@ class FpNode {
 
  private:
   FpType fpTypeID;
-  static unordered_map<string, FpNode> const_node_map;
+  static unordered_map<double, FpNode> const_double_node_map;
+  static unordered_map<float, FpNode> const_float_node_map;
 
  public:
   FpType getType() { return fpTypeID; }
