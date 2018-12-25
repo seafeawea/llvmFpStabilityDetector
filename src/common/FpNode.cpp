@@ -21,6 +21,7 @@ FpNode* FpNode::createConstantDouble(double val) {
     mpfr_set_d(node->shadow_value, val, MPFR_RNDN);
     node->depth = 1;
     node->valid_bits = 52;  // suppose constant always accurate
+    assert(node->isDoubleTy());
     return node;
   }
   node = &(it->second);
@@ -41,6 +42,7 @@ FpNode* FpNode::createConstantFloat(float val) {
     mpfr_set_d(node->shadow_value, val, MPFR_RNDN);
     node->depth = 1;
     node->valid_bits = 23;  // suppose constant always accurate
+    assert(node->isFloatTy());
     return node;
   }
   node = &(it->second);

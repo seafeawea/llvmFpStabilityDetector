@@ -28,7 +28,31 @@ static bool is_write_to_file = (getenv(FILE_TO_PRINT_ERROR_ENV) != NULL);
 
 using namespace std;
 
-const char* __const__name__ = "__const__value__";
+char* __const__name__ = {"__const__value__"};
+bool __already_found_const_name__ = false;
+
+unordered_map<uint64_t, uint64_t> __name_to_arr_identifier__;
+unordered_map<uint64_t, uint64_t> __arr_identifier_to_name__;
+uint64_t __array__count__ = 1;
+uint64_t getArrayElementIdentifier(const char* arr, uint64_t index) {
+  uint64_t ptr = reinterpret_cast<uint64_t>(arr);
+  auto it = __name_to_arr_identifier__.find(ptr);
+  if (it == __name_to_arr_identifier__.end()) {
+    uint64_t res = __array__count__ << 48;
+    ++__array__count__;
+    __name_to_arr_identifier__.insert(make_pair(ptr, res));
+    __arr_identifier_to_name__.insert(make_pair(res, ptr));
+    return res | index;
+  }
+  return it->second | index;
+}
+
+char* getArrayName(uint64_t identifier) {
+  uint64_t array_count = identifier >> 48;
+  auto it = __arr_identifier_to_name__.find(array_count);
+  assert(it != __name_to_arr_identifier__.end());
+  return reinterpret_cast<char*>(it->second);
+}
 
 class FloatInstructionInfo {
  public:
@@ -51,7 +75,7 @@ class FloatInstructionInfo {
     max_relative_error_from_fpinfo = NULL;
     execute_count_ = 0;
     sum_of_cancelled_badness_bits_ = 0;
-    //avg_cancelled_badness_bits_ = 0;
+    // avg_cancelled_badness_bits_ = 0;
     sum_valid_bits_ = 0;
     // avg_valid_bits_ = 0.0;
   }
@@ -97,7 +121,7 @@ class FloatInstructionInfo {
   int64_t sum_valid_bits_;
 
   const FloatInstructionInfo* max_relative_error_from_fpinfo;
-  //double avg_cancelled_badness_bits_;
+  // double avg_cancelled_badness_bits_;
   int64_t execute_count_;
 
   double getAvgCancelledBadnessBits() {
@@ -126,7 +150,7 @@ class FunctionFloatErrorInfo {
   FunctionFloatErrorInfo(const char* name) : func_name(name) {}
 
   string func_name;
-  unordered_map<string, FloatInstructionInfo> fp_instruction_Info_map;
+  unordered_map<uint64_t, FloatInstructionInfo> fp_instruction_Info_map;
 
   static unordered_map<int32_t, FunctionFloatErrorInfo> all_function_info;
 };
@@ -169,7 +193,7 @@ void writeErrorToStream(ostream& out) {
            "| avg valid bits | "
            " count  | Possable cause from "
         << endl;
-    unordered_map<string, FloatInstructionInfo>& func_info =
+    unordered_map<uint64_t, FloatInstructionInfo>& func_info =
         ait->second.fp_instruction_Info_map;
     vector<FloatInstructionInfo*> reorder_vector;
     for (auto fit = func_info.begin(); fit != func_info.end(); fit++) {
@@ -217,11 +241,11 @@ extern "C" void checkAndPrintInfo(int32_t func_id) {
 }
 
 extern "C" void* createFpNodeMap() {
-  return (void*)(new unordered_map<string, vector<FpNode> >());
+  return (void*)(new unordered_map<uint64_t, vector<FpNode> >());
 }
 
 extern "C" void deleteFunctionFloatErrorInfo(void* ptr_fp_node_map) {
-  delete (unordered_map<string, vector<FpNode> >*)ptr_fp_node_map;
+  delete (unordered_map<uint64_t, vector<FpNode> >*)ptr_fp_node_map;
 }
 
 static char* mpfrToString(char* str, mpfr_t* fp) {
@@ -310,21 +334,38 @@ inline int32_t getExponent(T value) {
 
 FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
                          const char* arg_name, double value) {
-  string arg_name_str(arg_name);
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  // string arg_name_str(arg_name);
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
 
+  uint64_t arg_name_ptr = reinterpret_cast<uint64_t>(arg_name);
+
   FpNode* arg_node;
-  if (arg_name_str == "__const__value__") {
-    assert(arg_name = __const__name__);
+  // if()
+  // cout << "arg_name=" << arg_name << endl;
+  if (!(arg_name_ptr >> 48)) {
+    if (__builtin_expect(!__already_found_const_name__, 0)) {
+      if (strcmp(arg_name, __const__name__) == 0) {
+        __const__name__ = const_cast<char*>(arg_name);
+        __already_found_const_name__ = true;
+      }
+    }
+  }
+
+  if (arg_name == __const__name__) {
+    // assert(arg_name = __const__name__);
+    /* if (value < 2.096 && value > 2.093) {
+      assert(0);
+      cout << "const value = " << value << endl;
+    } */
     arg_node = FpNode::createConstantDouble(value);
-  } else if (fp_node_map->find(arg_name_str) == fp_node_map->end()) {
+  } else if (fp_node_map->find(arg_name_ptr) == fp_node_map->end()) {
     // first process node with whis name
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(arg_name_str, vector<FpNode>()));
-    (*fp_node_map)[arg_name_str].emplace_back(FpNode::kDouble);
-    arg_node = &((*fp_node_map)[arg_name_str].back());
+        pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
+    (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kDouble);
+    arg_node = &((*fp_node_map)[arg_name_ptr].back());
     arg_node->d_value = value;
     mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
     arg_node->depth = 1;
@@ -332,14 +373,14 @@ FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     arg_node->line = line;
   } else {
     arg_node =
-        &((*fp_node_map)[arg_name_str].back());  // just get the lastest node
+        &((*fp_node_map)[arg_name_ptr].back());  // just get the lastest node
     if (arg_node->d_value != value) {
       // must be a unknown function which produce the value
 
       fp_node_map->insert(
-          pair<string, vector<FpNode> >(arg_name_str, vector<FpNode>()));
-      (*fp_node_map)[arg_name_str].emplace_back(FpNode::kDouble);
-      arg_node = &((*fp_node_map)[arg_name_str].back());
+          pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
+      (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kDouble);
+      arg_node = &((*fp_node_map)[arg_name_ptr].back());
       arg_node->d_value = value;
       mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
       arg_node->depth = 1;
@@ -354,23 +395,33 @@ FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
 
 FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
                         const char* arg_name, float value) {
-  string arg_name_str(arg_name);
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  // string arg_name_str(arg_name);
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
+  uint64_t arg_name_ptr = reinterpret_cast<uint64_t>(arg_name);
+
+  if (!(arg_name_ptr >> 48)) {
+    if (__builtin_expect(!__already_found_const_name__, 0)) {
+      if (strcmp(arg_name, __const__name__) == 0) {
+        __const__name__ = const_cast<char*>(arg_name);
+        __already_found_const_name__ = true;
+      }
+    }
+  }
 
   FpNode* arg_node;
-  if (arg_name_str == "__const__value__") {
+  if (arg_name == __const__name__) {
     // arg_node = createConstantFloatIfNotExists(value);
-    assert(arg_name = __const__name__);
+    // assert(arg_name = __const__name__);
     arg_node = FpNode::createConstantFloat(value);
-  } else if (fp_node_map->find(arg_name_str) == fp_node_map->end()) {
+  } else if (fp_node_map->find(arg_name_ptr) == fp_node_map->end()) {
     // first process node with whis name
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(arg_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
     //(*fp_node_map)[arg_name_str].emplace_back(FpNode::kFloat);
-    (*fp_node_map)[arg_name_str].emplace_back(FpNode::kFloat);
-    arg_node = &((*fp_node_map)[arg_name_str].back());
+    (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kFloat);
+    arg_node = &((*fp_node_map)[arg_name_ptr].back());
     arg_node->f_value = value;
     mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
     arg_node->depth = 1;
@@ -378,14 +429,14 @@ FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     arg_node->line = line;
   } else {
     arg_node =
-        &((*fp_node_map)[arg_name_str].back());  // just get the lastest node
+        &((*fp_node_map)[arg_name_ptr].back());  // just get the lastest node
     if (arg_node->f_value != value) {
       // must be a unknown function which produce the value
 
       fp_node_map->insert(
-          pair<string, vector<FpNode> >(arg_name_str, vector<FpNode>()));
-      (*fp_node_map)[arg_name_str].emplace_back(FpNode::kFloat);
-      arg_node = &((*fp_node_map)[arg_name_str].back());
+          pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
+      (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kFloat);
+      arg_node = &((*fp_node_map)[arg_name_ptr].back());
       arg_node->f_value = value;
       mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
       arg_node->depth = 1;
@@ -401,22 +452,24 @@ FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
 extern "C" void __storeDouble(void* ptr_fp_node_map, const char* from,
                               const char* to, int32_t func_id, int32_t line,
                               double from_val) {
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
 
-  string from_name_str(from);
-  string to_name_str(to);
+  // uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
+  // string to_name_str(to);
+  // uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
+  uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to);
   FpNode* from_node;
   from_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, from, from_val);
 
   FpNode* to_node;
-  if (fp_node_map->find(to_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(to_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[to_name_str].emplace_back(FpNode::kDouble);
-  to_node = &((*fp_node_map)[to_name_str].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kDouble);
+  to_node = &((*fp_node_map)[to_name_ptr].back());
   to_node->d_value = from_node->d_value;
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -439,25 +492,31 @@ extern "C" void __storeDouble(void* ptr_fp_node_map, const char* from,
 
 extern "C" void __doubleStoreToDoubleArrayElement(
     void* ptr_fp_node_map, const char* from, const char* to, int32_t func_id,
-    int32_t line, double from_val, int64_t index) {
-  string to_name_str(to);
+    int32_t line, double from_val, uint64_t index) {
+  // string to_name_str(to);
   // to_name_str.append("[" + to_string(index) + "]");
   // for better performance
-  to_name_str.append("[" + to_string(index));
+  // to_name_str.append("[" + to_string(index));
 
-  __storeDouble(ptr_fp_node_map, from, to_name_str.c_str(), func_id, line,
-                from_val);
+  //__storeDouble(ptr_fp_node_map, from, to_name_str.c_str(), func_id, line,
+  //              from_val);
+  __storeDouble(ptr_fp_node_map, from,
+                reinterpret_cast<char*>(getArrayElementIdentifier(to, index)),
+                func_id, line, from_val);
 }
 
 extern "C" void __doubleArrayElementStoreToDouble(
     void* ptr_fp_node_map, const char* from, const char* to, int32_t func_id,
-    int32_t line, double from_val, int64_t index) {
-  string from_name_str(from);
+    int32_t line, double from_val, uint64_t index) {
+  // uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
   // from_name_str.append("[" + to_string(index) + "]");
-  from_name_str.append("[" + to_string(index));
+  // from_name_str.append("[" + to_string(index));
 
-  __storeDouble(ptr_fp_node_map, from_name_str.c_str(), to, func_id, line,
-                from_val);
+  //__storeDouble(ptr_fp_node_map, from_name_str.c_str(), to, func_id, line,
+  //              from_val);
+  __storeDouble(ptr_fp_node_map,
+                reinterpret_cast<char*>(getArrayElementIdentifier(from, index)),
+                to, func_id, line, from_val);
 }
 
 void printResultNodePath(const FpNode& result_node) {
@@ -548,24 +607,26 @@ void updataResultNode(FpNode* result_node) {
   }
 }
 
-void updateFloatOpInfo(const string& op_name, FpNode* op_node,
-                       const int32_t func_id, const int32_t line,
+void updateFloatOpInfo(char* op_name, FpNode* op_node, const int32_t func_id,
+                       const int32_t line,
                        FloatInstructionInfo::FOPType fop_type) {
   unordered_map<int32_t, FunctionFloatErrorInfo>& all_function_info =
       FunctionFloatErrorInfo::all_function_info;
-  unordered_map<string, FloatInstructionInfo>& fp_instruction_Info_map =
+  unordered_map<uint64_t, FloatInstructionInfo>& fp_instruction_Info_map =
       all_function_info.find(func_id)->second.fp_instruction_Info_map;
+  uint64_t op_name_ptr = reinterpret_cast<uint64_t>(op_name);
 
   // result_name is instruction name, for llvm use SSA
   FloatInstructionInfo* cur_fop_info;
-  if (fp_instruction_Info_map.find(op_name) == fp_instruction_Info_map.end()) {
-    fp_instruction_Info_map.insert(pair<string, FloatInstructionInfo>(
-        op_name, FloatInstructionInfo(line, fop_type)));
-    cur_fop_info = &fp_instruction_Info_map[op_name];
-    cur_fop_info->name_ = op_name;
+  if (fp_instruction_Info_map.find(op_name_ptr) ==
+      fp_instruction_Info_map.end()) {
+    fp_instruction_Info_map.insert(pair<uint64_t, FloatInstructionInfo>(
+        op_name_ptr, FloatInstructionInfo(line, fop_type)));
+    cur_fop_info = &fp_instruction_Info_map[op_name_ptr];
+    cur_fop_info->name_ = string(op_name);
 
   } else {
-    cur_fop_info = &fp_instruction_Info_map[op_name];
+    cur_fop_info = &fp_instruction_Info_map[op_name_ptr];
   }
   op_node->fp_info = cur_fop_info;
   cur_fop_info->execute_count_++;
@@ -596,25 +657,26 @@ extern "C" double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,
   double r = a + b;
   // map<string, vector<FpNode> >* fp_node_map =
   //     all_function_info[func_id].fp_node_map;
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  // string result_name_str(result_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -632,7 +694,7 @@ extern "C" double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,
 
   updataResultNode(result_node);
 
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleAdd);
 
   return r;
@@ -643,25 +705,25 @@ extern "C" double _fp_debug_doublesub(void* ptr_fp_node_map, double a, double b,
                                       char* a_name, char* b_name,
                                       char* result_name) {
   double r = a - b;
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -683,7 +745,7 @@ extern "C" double _fp_debug_doublesub(void* ptr_fp_node_map, double a, double b,
 
   updataResultNode(result_node);
 
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleSub);
 
   return r;
@@ -696,25 +758,25 @@ extern "C" double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
   double r = a * b;
   // map<string, vector<FpNode> >* fp_node_map =
   //     all_function_info[func_id].fp_node_map;
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -729,11 +791,11 @@ extern "C" double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
 
   updataResultNode(result_node);
 
-  unordered_map<string, FloatInstructionInfo>& fp_instruction_Info_map =
+  unordered_map<uint64_t, FloatInstructionInfo>& fp_instruction_Info_map =
       FunctionFloatErrorInfo::all_function_info.find(func_id)
           ->second.fp_instruction_Info_map;
   // result_name is instruction name, for llvm use SSA
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleMul);
 
   return r;
@@ -745,29 +807,29 @@ extern "C" double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
                                       char* result_name) {
   double r = a / b;
 
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
-  //assert(a_name_str != "");
-  //assert(b_name_str != "");
-  assert(result_name_str != "");
+  // assert(a_name_str != "");
+  // assert(b_name_str != "");
+  assert(result_name != "");
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -779,7 +841,7 @@ extern "C" double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
       abs(a_node->valid_bits - b_node->valid_bits);
   updataResultNode(result_node);
 
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleDiv);
 
   return r;
@@ -788,22 +850,23 @@ extern "C" double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
 extern "C" void __storeFloat(void* ptr_fp_node_map, const char* from,
                              const char* to, int32_t func_id, int32_t line,
                              float from_val) {
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
 
-  string from_name_str(from);
-  string to_name_str(to);
+  uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
+  uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to);
+  // string to_name_str(to);
   FpNode* from_node;
   from_node = getFloatArgNode(ptr_fp_node_map, func_id, line, from, from_val);
 
   FpNode* to_node;
-  if (fp_node_map->find(to_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(to_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[to_name_str].emplace_back(FpNode::kFloat);
-  to_node = &((*fp_node_map)[to_name_str].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kFloat);
+  to_node = &((*fp_node_map)[to_name_ptr].back());
   to_node->f_value = from_node->f_value;
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -827,10 +890,10 @@ extern "C" void __storeFloat(void* ptr_fp_node_map, const char* from,
 extern "C" void __doubleToFloat(void* ptr_fp_node_map, const char* from_name,
                                 const char* to_name, int32_t func_id,
                                 int32_t line, double from_val) {
-  string from_name_str(from_name);
-  string to_name_str(to_name);
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from_name);
+  uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to_name);
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
 
   FpNode* from_node;
@@ -838,12 +901,12 @@ extern "C" void __doubleToFloat(void* ptr_fp_node_map, const char* from_name,
 
   from_node =
       getDoubleArgNode(ptr_fp_node_map, func_id, line, from_name, from_val);
-  if (fp_node_map->find(to_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(to_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[to_name_str].emplace_back(FpNode::kFloat);
-  to_node = &((*fp_node_map)[to_name_str].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kFloat);
+  to_node = &((*fp_node_map)[to_name_ptr].back());
   to_node->f_value = (float)(from_node->d_value);
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -873,10 +936,10 @@ extern "C" void __doubleToFloat(void* ptr_fp_node_map, const char* from_name,
 extern "C" void __floatToDouble(void* ptr_fp_node_map, const char* from_name,
                                 const char* to_name, int32_t func_id,
                                 int32_t line, float from_val) {
-  string from_name_str(from_name);
-  string to_name_str(to_name);
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from_name);
+  uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to_name);
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
 
   FpNode* from_node;
@@ -884,12 +947,12 @@ extern "C" void __floatToDouble(void* ptr_fp_node_map, const char* from_name,
 
   from_node =
       getFloatArgNode(ptr_fp_node_map, func_id, line, from_name, from_val);
-  if (fp_node_map->find(to_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(to_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[to_name_str].emplace_back(FpNode::kDouble);
-  to_node = &((*fp_node_map)[to_name_str].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kDouble);
+  to_node = &((*fp_node_map)[to_name_ptr].back());
   to_node->d_value = (float)(from_node->f_value);
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -918,25 +981,25 @@ extern "C" float _fp_debug_floatadd(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a + b;
 
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getFloatArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -957,7 +1020,7 @@ extern "C" float _fp_debug_floatadd(void* ptr_fp_node_map, float a, float b,
   }
 
   updataResultNode(result_node);
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kFloatAdd);
 
   return r;
@@ -968,25 +1031,25 @@ extern "C" float _fp_debug_floatsub(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a - b;
 
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getFloatArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -1007,7 +1070,7 @@ extern "C" float _fp_debug_floatsub(void* ptr_fp_node_map, float a, float b,
   }
 
   updataResultNode(result_node);
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kFloatSub);
 
   return r;
@@ -1018,25 +1081,25 @@ extern "C" float _fp_debug_floatmul(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a * b;
 
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getFloatArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -1049,7 +1112,7 @@ extern "C" float _fp_debug_floatmul(void* ptr_fp_node_map, float a, float b,
       abs(a_node->valid_bits - b_node->valid_bits);
 
   updataResultNode(result_node);
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kFloatMul);
 
   return r;
@@ -1060,25 +1123,25 @@ extern "C" float _fp_debug_floatdiv(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a / b;
 
-  unordered_map<string, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<string, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
           ptr_fp_node_map);
-  //string a_name_str(a_name);
-  //string b_name_str(b_name);
-  string result_name_str(result_name);
+  // string a_name_str(a_name);
+  // string b_name_str(b_name);
+  uint64_t result_name_ptr = reinterpret_cast<uint64_t>(result_name);
 
   FpNode* a_node;
   FpNode* b_node;
   a_node = getFloatArgNode(ptr_fp_node_map, func_id, line, a_name, a);
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
-  if (fp_node_map->find(result_name_str) == fp_node_map->end()) {
+  if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
     fp_node_map->insert(
-        pair<string, vector<FpNode> >(result_name_str, vector<FpNode>()));
+        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
   }
-  (*fp_node_map)[result_name_str].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
 
-  FpNode* result_node = &((*fp_node_map)[result_name_str].back());
+  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -1091,7 +1154,7 @@ extern "C" float _fp_debug_floatdiv(void* ptr_fp_node_map, float a, float b,
       abs(a_node->valid_bits - b_node->valid_bits);
 
   updataResultNode(result_node);
-  updateFloatOpInfo(result_name_str, result_node, func_id, line,
+  updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kFloatDiv);
 
   return r;
