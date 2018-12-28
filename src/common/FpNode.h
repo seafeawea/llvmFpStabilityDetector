@@ -1,9 +1,11 @@
 #ifndef _FP_NODE_H
 #define _FP_NODE_H
 
-#include <map>
+#include <assert.h>
 #include <mpfr.h>
 #include <stdint.h>
+#include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -19,14 +21,27 @@ class FpNode {
 
  private:
   FpType fpTypeID;
-  static unordered_map<double, FpNode> const_double_node_map;
-  static unordered_map<float, FpNode> const_float_node_map;
+  static unordered_map<double, shared_ptr<FpNode> > const_double_node_map;
+  static unordered_map<float, shared_ptr<FpNode> > const_float_node_map;
 
  public:
   FpType getType() { return fpTypeID; }
-  bool isFloatTy() { return fpTypeID == kFloat; }
-  bool isDoubleTy() { return fpTypeID == kDouble; }
-  bool isValid() { return fpTypeID != kUnknown; }
+  bool isFloatTy() const { return fpTypeID == kFloat; }
+  bool isDoubleTy() const { return fpTypeID == kDouble; }
+  bool isValid() const { return fpTypeID != kUnknown; }
+
+  string getTypeString() const {
+    switch (fpTypeID) {
+      case kFloat:
+        return "Float";
+        break;
+      case kDouble:
+        return "Double";
+        break;
+      default:
+        assert(0 && "Invalid Float Op Type");
+    }
+  }
 
   int32_t line;
   int32_t valid_bits;
@@ -48,17 +63,26 @@ class FpNode {
   FpNode* relative_bigger_arg;
   FloatInstructionInfo* fp_info;
 
-  
+  uint64_t debug_identifier;
 
   static FpNode* createConstantDouble(double val);
 
   static FpNode* createConstantFloat(float val);
 
-  FpNode(FpType fpty);
+  FpNode() = delete;
+
+  explicit FpNode(FpType&& fpty);
+
+  // explicit FpNode(FpType fpty);
 
   FpNode(const FpNode& f);
 
-  ~FpNode() { mpfr_clear(shadow_value); }
+  FpNode(FpNode&& f);
+
+  ~FpNode() {
+    mpfr_clear(shadow_value);
+    fpTypeID = kUnknown;  // mark the memeory is invalid
+  }
 };
 
-#endif // _FP_NODE_H
+#endif  // _FP_NODE_H

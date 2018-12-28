@@ -12,7 +12,9 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -67,6 +69,9 @@ class FloatInstructionInfo {
     kDoubleDiv
   };
 
+  static const int kSaveThresholdBit = 5;
+  static const int kSavePathLength = 20;
+
   FloatInstructionInfo() {}
 
   FloatInstructionInfo(int32_t line, FOPType fop_type)
@@ -78,6 +83,7 @@ class FloatInstructionInfo {
     // avg_cancelled_badness_bits_ = 0;
     sum_valid_bits_ = 0;
     // avg_valid_bits_ = 0.0;
+    max_relative_error_FpNode_path.reserve(2 * kSavePathLength);
   }
 
   string getTypeString() {
@@ -117,6 +123,7 @@ class FloatInstructionInfo {
   double max_relative_error_;
   double sum_relative_error_;
   // FpNode* max_relative_error_from_FpNode;
+
   int64_t sum_of_cancelled_badness_bits_;
   int64_t sum_valid_bits_;
 
@@ -134,8 +141,15 @@ class FloatInstructionInfo {
     return (double)(sum_valid_bits_) / (double)(execute_count_);
   }
 
+  void copyFpNodePath(const FpNode& head);
+
+  const vector<FpNode>* getFpNodePath() {
+    return &max_relative_error_FpNode_path;
+  }
+
  private:
   // double avg_valid_bits_;
+  vector<FpNode> max_relative_error_FpNode_path;
 };
 
 template <typename FpType>
@@ -217,7 +231,173 @@ void writeErrorToStream(ostream& out) {
 
       out << endl;
     }
+     
     out << "=========================" << endl;
+  }
+
+  // out << endl;
+  out << "==============Now print the max relative path==============" << endl;
+  out << setprecision(10);
+  for (auto ait = all_function_info.begin(); ait != all_function_info.end();
+       ait++) {
+    out << "function :" << ait->second.func_name << endl;
+    unordered_map<uint64_t, FloatInstructionInfo>& func_info =
+        ait->second.fp_instruction_Info_map;
+    vector<FloatInstructionInfo*> reorder_vector;
+    for (auto fit = func_info.begin(); fit != func_info.end(); fit++) {
+      reorder_vector.push_back(&(fit->second));
+    }
+    if (reorder_vector.size() == 0) {
+      out << "Good and Stable.\n";
+      continue;
+    }
+    sort(reorder_vector.begin(), reorder_vector.end(), cmpByLine);
+    for (auto fit = reorder_vector.begin(); fit != reorder_vector.end();
+         fit++) {
+      const vector<FpNode>* path = (*fit)->getFpNodePath();
+      int ID = 0;
+      if (path->size() > 0) {
+        out << "----------------------------------------\n"
+            << "  ID  |  node name  |   optype   |  type  |  line  |  depth  | "
+               "       "
+               "value       |     real "
+               "value      | valid bit |  from(ID)  | Possable cause from(ID) "
+            << endl;
+        for (auto pit = path->begin(); pit != path->end(); pit++) {
+          out << setw(5) << ID << " |";
+          if (pit->fp_info != NULL) {
+            out << setw(12) << pit->fp_info->name_ << " | " << setw(10)
+                << pit->fp_info->getTypeString() << " | ";
+          } else {
+            out << "   unknown   |            | ";
+          }
+          out << setw(6) << pit->getTypeString() << " | " << setw(6);
+          if (pit->fp_info != NULL) { 
+            out << pit->fp_info->line_;
+          } else {
+            out << pit->line;
+          }
+            out << " | " << setw(7) << pit->depth << " | ";
+          if (pit->isDoubleTy()) {
+            out << setw(18) << pit->d_value << " | " << setw(17)
+                << mpfr_get_d(pit->shadow_value, MPFR_RNDN);
+          } else {
+            out << setw(18) << pit->f_value << " | " << setw(17)
+                << mpfr_get_flt(pit->shadow_value, MPFR_RNDN);
+          }
+          out << " | " << setw(9) << pit->valid_bits << " | ";
+          //if(pit->)
+          if (pit->depth == 1) {
+            out << "  None     |   None";
+          } else if (pit->relative_bigger_arg == NULL) {
+            out << "Not Record |   Not Record";
+          } else {
+            if (pit->fp_info != NULL) { 
+              out << setw(4) << (pit->first_arg) - &(*(path->begin()));
+              switch(pit->fp_info->fop_type_) {
+                case FloatInstructionInfo::kFloatAdd:
+                case FloatInstructionInfo::kDoubleAdd:
+                  out << "+";
+                  break;
+                case FloatInstructionInfo::kFloatSub:
+                case FloatInstructionInfo::kDoubleSub:
+                  out << "-";
+                  break;
+                case FloatInstructionInfo::kFloatMul:
+                case FloatInstructionInfo::kDoubleMul:
+                  out << "*";
+                  break;
+                case FloatInstructionInfo::kFloatDiv:
+                case FloatInstructionInfo::kDoubleDiv:
+                  out << "/";
+                  break;
+                default:
+                  assert(0 && "Invalid Float Op Type");
+              }
+              out.flags(ios::left);
+              out << setw(5)<<  (pit->second_arg) - &(*(path->begin()));
+              out.flags(ios::right);
+              out<<" | ";
+            } else {
+              out << "Not Record | ";
+            }
+            out << "   " << (pit->relative_bigger_arg) - &(*(path->begin()));
+          }
+          out << endl;
+          ++ID;
+        }
+        out << endl;
+      }
+    }
+    out << setprecision(6);
+  }
+}
+
+void* debug_ptr;
+
+void isFpNodeMapValid(void* ptr_fp_node_map) {
+  auto ptr =
+      (unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*)ptr_fp_node_map;
+  for (auto it = ptr->begin(); it != ptr->end(); it++) {
+    for (auto vit = it->second.begin(); vit != it->second.end(); vit++) {
+      assert((*vit)->depth > 0);
+      mpfr_get_d((*vit)->shadow_value, MPFR_RNDN);
+    }
+  }
+  // cout << "gpod in " << __FUNCTION__ <<endl;
+}
+
+void FloatInstructionInfo::copyFpNodePath(const FpNode& head) {
+  // return;
+  // volatile auto ptr = (unordered_map<uint64_t, vector<shared_ptr<FpNode>>
+  // >*)debug_ptr; isFpNodeMapValid(debug_ptr);
+  vector<FpNode>& path = max_relative_error_FpNode_path;
+
+  path.clear();
+  // very importran for path to reserve space, in case of vector resize and
+  // the pointer cur lost effect
+  path.reserve(2 * kSavePathLength);
+  path.emplace_back(head);
+  FpNode* cur = &(path.back());
+  FpNode *first, *second;
+  int length_to_save = kSavePathLength;
+
+  while (length_to_save > 0) {
+    if (cur->depth == 1) break;
+    mpfr_get_d(cur->first_arg->shadow_value, MPFR_RNDN);
+    assert(cur->first_arg != NULL);
+    if (cur->relative_bigger_arg == NULL) {
+      if (cur->second_arg != NULL) {
+        path.emplace_back(*(cur->second_arg));
+        cur->second_arg = &(path.back());
+        path.back().relative_bigger_arg = NULL;
+      }
+      path.emplace_back(*(cur->first_arg));
+      cur->first_arg = &(path.back());
+    } else {
+      if (cur->relative_bigger_arg == cur->first_arg) {
+        if (cur->second_arg != NULL) {
+          path.emplace_back(*(cur->second_arg));
+          cur->second_arg = &(path.back());
+          path.back().relative_bigger_arg = NULL;
+        }
+        path.emplace_back(*(cur->first_arg));
+        cur->first_arg = &(path.back());
+      } else {
+        assert(cur->second_arg != NULL);
+        assert(cur->second_arg->isValid());
+        assert(cur->relative_bigger_arg == cur->second_arg);
+        path.emplace_back(*(cur->first_arg));
+        cur->first_arg = &(path.back());
+        path.back().relative_bigger_arg = NULL;
+        path.emplace_back(*(cur->second_arg));
+        cur->second_arg = &(path.back());
+      }
+    }
+    cur->relative_bigger_arg = &(path.back());
+    cur = &(path.back());
+  
+    --length_to_save;
   }
 }
 
@@ -241,11 +421,13 @@ extern "C" void checkAndPrintInfo(int32_t func_id) {
 }
 
 extern "C" void* createFpNodeMap() {
-  return (void*)(new unordered_map<uint64_t, vector<FpNode> >());
+  debug_ptr =
+      (void*)(new unordered_map<uint64_t, vector<shared_ptr<FpNode>>>());
+  return debug_ptr;
 }
 
 extern "C" void deleteFunctionFloatErrorInfo(void* ptr_fp_node_map) {
-  delete (unordered_map<uint64_t, vector<FpNode> >*)ptr_fp_node_map;
+  delete (unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*)ptr_fp_node_map;
 }
 
 static char* mpfrToString(char* str, mpfr_t* fp) {
@@ -335,8 +517,8 @@ inline int32_t getExponent(T value) {
 FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
                          const char* arg_name, double value) {
   // string arg_name_str(arg_name);
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
 
   uint64_t arg_name_ptr = reinterpret_cast<uint64_t>(arg_name);
@@ -362,10 +544,11 @@ FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     arg_node = FpNode::createConstantDouble(value);
   } else if (fp_node_map->find(arg_name_ptr) == fp_node_map->end()) {
     // first process node with whis name
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
-    (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kDouble);
-    arg_node = &((*fp_node_map)[arg_name_ptr].back());
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        arg_name_ptr, vector<shared_ptr<FpNode>>()));
+    (*fp_node_map)[arg_name_ptr].emplace_back(
+        make_shared<FpNode>(FpNode::kDouble));
+    arg_node = (*fp_node_map)[arg_name_ptr].back().get();
     arg_node->d_value = value;
     mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
     arg_node->depth = 1;
@@ -373,14 +556,15 @@ FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     arg_node->line = line;
   } else {
     arg_node =
-        &((*fp_node_map)[arg_name_ptr].back());  // just get the lastest node
+        (*fp_node_map)[arg_name_ptr].back().get();  // just get the lastest node
     if (arg_node->d_value != value) {
       // must be a unknown function which produce the value
 
-      fp_node_map->insert(
-          pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
-      (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kDouble);
-      arg_node = &((*fp_node_map)[arg_name_ptr].back());
+      fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+          arg_name_ptr, vector<shared_ptr<FpNode>>()));
+      (*fp_node_map)[arg_name_ptr].emplace_back(
+          make_shared<FpNode>(FpNode::kDouble));
+      arg_node = (*fp_node_map)[arg_name_ptr].back().get();
       arg_node->d_value = value;
       mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
       arg_node->depth = 1;
@@ -389,6 +573,7 @@ FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     }
   }
 
+  // cout << mpfr_get_d(arg_node->shadow_value, MPFR_RNDN) << endl;
   assert(arg_node->isDoubleTy());
   return arg_node;
 }
@@ -396,8 +581,8 @@ FpNode* getDoubleArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
 FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
                         const char* arg_name, float value) {
   // string arg_name_str(arg_name);
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   uint64_t arg_name_ptr = reinterpret_cast<uint64_t>(arg_name);
 
@@ -417,11 +602,12 @@ FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     arg_node = FpNode::createConstantFloat(value);
   } else if (fp_node_map->find(arg_name_ptr) == fp_node_map->end()) {
     // first process node with whis name
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
-    //(*fp_node_map)[arg_name_str].emplace_back(FpNode::kFloat);
-    (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kFloat);
-    arg_node = &((*fp_node_map)[arg_name_ptr].back());
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        arg_name_ptr, vector<shared_ptr<FpNode>>()));
+    //(*fp_node_map)[arg_name_str].emplace_back(make_shared<FpNode>(FpNode::kFloat));
+    (*fp_node_map)[arg_name_ptr].emplace_back(
+        make_shared<FpNode>(FpNode::kFloat));
+    arg_node = (*fp_node_map)[arg_name_ptr].back().get();
     arg_node->f_value = value;
     mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
     arg_node->depth = 1;
@@ -429,14 +615,15 @@ FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
     arg_node->line = line;
   } else {
     arg_node =
-        &((*fp_node_map)[arg_name_ptr].back());  // just get the lastest node
+        (*fp_node_map)[arg_name_ptr].back().get();  // just get the lastest node
     if (arg_node->f_value != value) {
       // must be a unknown function which produce the value
 
-      fp_node_map->insert(
-          pair<uint64_t, vector<FpNode> >(arg_name_ptr, vector<FpNode>()));
-      (*fp_node_map)[arg_name_ptr].emplace_back(FpNode::kFloat);
-      arg_node = &((*fp_node_map)[arg_name_ptr].back());
+      fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+          arg_name_ptr, vector<shared_ptr<FpNode>>()));
+      (*fp_node_map)[arg_name_ptr].emplace_back(
+          make_shared<FpNode>(FpNode::kFloat));
+      arg_node = (*fp_node_map)[arg_name_ptr].back().get();
       arg_node->f_value = value;
       mpfr_set_d(arg_node->shadow_value, value, MPFR_RNDN);
       arg_node->depth = 1;
@@ -452,24 +639,30 @@ FpNode* getFloatArgNode(void* ptr_fp_node_map, int32_t func_id, int32_t line,
 extern "C" void __storeDouble(void* ptr_fp_node_map, const char* from,
                               const char* to, int32_t func_id, int32_t line,
                               double from_val) {
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
 
-  // uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
+  // for debug
+  // string from_name_str(from);
   // string to_name_str(to);
-  // uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
+  // assert(from_name_str != to_name_str);
+  uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
   uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to);
+  assert(from_name_ptr != to_name_ptr);
   FpNode* from_node;
   from_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, from, from_val);
-
+  assert(from_node->isValid());
   FpNode* to_node;
   if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        to_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kDouble);
-  to_node = &((*fp_node_map)[to_name_ptr].back());
+  assert(from_node->isValid());
+  (*fp_node_map)[to_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kDouble));
+  assert(from_node->isValid());
+  to_node = (*fp_node_map)[to_name_ptr].back().get();
   to_node->d_value = from_node->d_value;
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -485,6 +678,10 @@ extern "C" void __storeDouble(void* ptr_fp_node_map, const char* from,
   to_node->real_error_to_shadow = from_node->real_error_to_shadow;
   to_node->relative_error_to_shadow = from_node->relative_error_to_shadow;
   to_node->fp_info = from_node->fp_info;
+
+  // for debug
+  // assert(mpfr_get_d(from_node->shadow_value, MPFR_RNDN) ==
+  //       mpfr_get_d(to_node->shadow_value, MPFR_RNDN));
 
   assert(from_node->isDoubleTy());
   assert(to_node->isDoubleTy());
@@ -639,11 +836,17 @@ void updateFloatOpInfo(char* op_name, FpNode* op_node, const int32_t func_id,
   cur_fop_info->sum_valid_bits_ += op_node->valid_bits;
   // cur_fop_info->avg_valid_bits_ = (double)(cur_fop_info->sum_valid_bits_) /
   //                                (double)(cur_fop_info->execute_count_);
+
   if (op_node->relative_error_to_shadow > cur_fop_info->max_relative_error_) {
     cur_fop_info->max_relative_error_ = op_node->relative_error_to_shadow;
+    if (op_node->bits_canceled_by_this_instruction >
+        FloatInstructionInfo::kSaveThresholdBit) {
+      cur_fop_info->copyFpNodePath(*op_node);
+    }
 
     if (op_node->relative_bigger_arg != NULL &&
         op_node->relative_bigger_arg->fp_info != NULL) {
+      assert(op_node->relative_bigger_arg->isValid());
       cur_fop_info->max_relative_error_from_fpinfo =
           op_node->relative_bigger_arg->fp_info;
     }
@@ -655,10 +858,10 @@ extern "C" double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,
                                       char* a_name, char* b_name,
                                       char* result_name) {
   double r = a + b;
-  // map<string, vector<FpNode> >* fp_node_map =
+  // map<string, vector<shared_ptr<FpNode>> >* fp_node_map =
   //     all_function_info[func_id].fp_node_map;
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -671,16 +874,19 @@ extern "C" double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kDouble));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
   result_node->line = line;
+
+  result_node->debug_identifier = result_name_ptr;
 
   mpfr_add(result_node->shadow_value, a_node->shadow_value,
            b_node->shadow_value, MPFR_RNDN);
@@ -697,6 +903,7 @@ extern "C" double _fp_debug_doubleadd(void* ptr_fp_node_map, double a, double b,
   updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleAdd);
 
+  isFpNodeMapValid(ptr_fp_node_map);
   return r;
 }
 
@@ -705,8 +912,8 @@ extern "C" double _fp_debug_doublesub(void* ptr_fp_node_map, double a, double b,
                                       char* a_name, char* b_name,
                                       char* result_name) {
   double r = a - b;
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -718,18 +925,21 @@ extern "C" double _fp_debug_doublesub(void* ptr_fp_node_map, double a, double b,
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kDouble));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
   result_node->line = line;
   mpfr_sub(result_node->shadow_value, a_node->shadow_value,
            b_node->shadow_value, MPFR_RNDN);
+
+  result_node->debug_identifier = result_name_ptr;
 
   if (a == 0.0 || b == 0.0) {
     result_node->bits_canceled_by_this_instruction = 0;
@@ -748,6 +958,7 @@ extern "C" double _fp_debug_doublesub(void* ptr_fp_node_map, double a, double b,
   updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleSub);
 
+  isFpNodeMapValid(ptr_fp_node_map);
   return r;
 }
 
@@ -756,10 +967,10 @@ extern "C" double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
                                       char* a_name, char* b_name,
                                       char* result_name) {
   double r = a * b;
-  // map<string, vector<FpNode> >* fp_node_map =
+  // map<string, vector<shared_ptr<FpNode>> >* fp_node_map =
   //     all_function_info[func_id].fp_node_map;
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -771,12 +982,13 @@ extern "C" double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kDouble));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -784,6 +996,8 @@ extern "C" double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
 
   mpfr_mul(result_node->shadow_value, a_node->shadow_value,
            b_node->shadow_value, MPFR_RNDN);
+
+  result_node->debug_identifier = result_name_ptr;
 
   // result_node->bits_canceled_by_this_instruction = 0;
   result_node->bits_canceled_by_this_instruction =
@@ -795,6 +1009,7 @@ extern "C" double _fp_debug_doublemul(void* ptr_fp_node_map, double a, double b,
       FunctionFloatErrorInfo::all_function_info.find(func_id)
           ->second.fp_instruction_Info_map;
   // result_name is instruction name, for llvm use SSA
+  isFpNodeMapValid(ptr_fp_node_map);
   updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleMul);
 
@@ -807,8 +1022,8 @@ extern "C" double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
                                       char* result_name) {
   double r = a / b;
 
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -824,18 +1039,22 @@ extern "C" double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
   b_node = getDoubleArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kDouble);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kDouble));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->d_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
   result_node->line = line;
   mpfr_div(result_node->shadow_value, a_node->shadow_value,
            b_node->shadow_value, MPFR_RNDN);
+
+  result_node->debug_identifier = result_name_ptr;
+
   // result_node->bits_canceled_by_this_instruction = 0;
   result_node->bits_canceled_by_this_instruction =
       abs(a_node->valid_bits - b_node->valid_bits);
@@ -844,14 +1063,15 @@ extern "C" double _fp_debug_doublediv(void* ptr_fp_node_map, double a, double b,
   updateFloatOpInfo(result_name, result_node, func_id, line,
                     FloatInstructionInfo::kDoubleDiv);
 
+  isFpNodeMapValid(ptr_fp_node_map);
   return r;
 }
 
 extern "C" void __storeFloat(void* ptr_fp_node_map, const char* from,
                              const char* to, int32_t func_id, int32_t line,
                              float from_val) {
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
 
   uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from);
@@ -862,11 +1082,11 @@ extern "C" void __storeFloat(void* ptr_fp_node_map, const char* from,
 
   FpNode* to_node;
   if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        to_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kFloat);
-  to_node = &((*fp_node_map)[to_name_ptr].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(make_shared<FpNode>(FpNode::kFloat));
+  to_node = (*fp_node_map)[to_name_ptr].back().get();
   to_node->f_value = from_node->f_value;
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -892,8 +1112,8 @@ extern "C" void __doubleToFloat(void* ptr_fp_node_map, const char* from_name,
                                 int32_t line, double from_val) {
   uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from_name);
   uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to_name);
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
 
   FpNode* from_node;
@@ -902,11 +1122,11 @@ extern "C" void __doubleToFloat(void* ptr_fp_node_map, const char* from_name,
   from_node =
       getDoubleArgNode(ptr_fp_node_map, func_id, line, from_name, from_val);
   if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        to_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kFloat);
-  to_node = &((*fp_node_map)[to_name_ptr].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(make_shared<FpNode>(FpNode::kFloat));
+  to_node = (*fp_node_map)[to_name_ptr].back().get();
   to_node->f_value = (float)(from_node->d_value);
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -938,8 +1158,8 @@ extern "C" void __floatToDouble(void* ptr_fp_node_map, const char* from_name,
                                 int32_t line, float from_val) {
   uint64_t from_name_ptr = reinterpret_cast<uint64_t>(from_name);
   uint64_t to_name_ptr = reinterpret_cast<uint64_t>(to_name);
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
 
   FpNode* from_node;
@@ -948,11 +1168,12 @@ extern "C" void __floatToDouble(void* ptr_fp_node_map, const char* from_name,
   from_node =
       getFloatArgNode(ptr_fp_node_map, func_id, line, from_name, from_val);
   if (fp_node_map->find(to_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(to_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        to_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[to_name_ptr].emplace_back(FpNode::kDouble);
-  to_node = &((*fp_node_map)[to_name_ptr].back());
+  (*fp_node_map)[to_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kDouble));
+  to_node = (*fp_node_map)[to_name_ptr].back().get();
   to_node->d_value = (float)(from_node->f_value);
   mpfr_copysign(to_node->shadow_value, from_node->shadow_value,
                 from_node->shadow_value, MPFR_RNDN);
@@ -981,8 +1202,8 @@ extern "C" float _fp_debug_floatadd(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a + b;
 
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -994,12 +1215,13 @@ extern "C" float _fp_debug_floatadd(void* ptr_fp_node_map, float a, float b,
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kFloat));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -1031,8 +1253,8 @@ extern "C" float _fp_debug_floatsub(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a - b;
 
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -1044,12 +1266,13 @@ extern "C" float _fp_debug_floatsub(void* ptr_fp_node_map, float a, float b,
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kFloat));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -1081,8 +1304,8 @@ extern "C" float _fp_debug_floatmul(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a * b;
 
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -1094,12 +1317,13 @@ extern "C" float _fp_debug_floatmul(void* ptr_fp_node_map, float a, float b,
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kFloat));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
@@ -1123,8 +1347,8 @@ extern "C" float _fp_debug_floatdiv(void* ptr_fp_node_map, float a, float b,
                                     char* b_name, char* result_name) {
   float r = a / b;
 
-  unordered_map<uint64_t, vector<FpNode> >* fp_node_map =
-      reinterpret_cast<unordered_map<uint64_t, vector<FpNode> >*>(
+  unordered_map<uint64_t, vector<shared_ptr<FpNode>>>* fp_node_map =
+      reinterpret_cast<unordered_map<uint64_t, vector<shared_ptr<FpNode>>>*>(
           ptr_fp_node_map);
   // string a_name_str(a_name);
   // string b_name_str(b_name);
@@ -1136,12 +1360,13 @@ extern "C" float _fp_debug_floatdiv(void* ptr_fp_node_map, float a, float b,
   b_node = getFloatArgNode(ptr_fp_node_map, func_id, line, b_name, b);
 
   if (fp_node_map->find(result_name_ptr) == fp_node_map->end()) {
-    fp_node_map->insert(
-        pair<uint64_t, vector<FpNode> >(result_name_ptr, vector<FpNode>()));
+    fp_node_map->insert(pair<uint64_t, vector<shared_ptr<FpNode>>>(
+        result_name_ptr, vector<shared_ptr<FpNode>>()));
   }
-  (*fp_node_map)[result_name_ptr].emplace_back(FpNode::kFloat);
+  (*fp_node_map)[result_name_ptr].emplace_back(
+      make_shared<FpNode>(FpNode::kFloat));
 
-  FpNode* result_node = &((*fp_node_map)[result_name_ptr].back());
+  FpNode* result_node = (*fp_node_map)[result_name_ptr].back().get();
   result_node->f_value = r;
   result_node->first_arg = a_node;
   result_node->second_arg = b_node;
